@@ -1,0 +1,193 @@
+/* Line Localization Machine - Animation Styles */
+
+/* Preparing phase - subtle pulse indicating analysis */
+.llm-preparing {
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background: linear-gradient(90deg, transparent 0%, rgba(99, 102, 241, 0.1) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: llm-scan 1s ease-in-out infinite;
+}
+
+@keyframes llm-scan {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Fade out phase - content disappearing */
+.llm-fading-out {
+  position: relative;
+  animation: llm-fade-out 0.15s cubic-bezier(0.4, 0, 1, 1) forwards;
+  overflow: hidden;
+}
+
+@keyframes llm-fade-out {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0px);
+  }
+  50% {
+    transform: scale(0.98) translateY(-0.5px);
+  }
+  100% {
+    opacity: 0.3;
+    transform: scale(0.95) translateY(0);
+    filter: blur(1px);
+  }
+}
+
+/* Translated phase - content appearing with glow */
+.llm-translated {
+  position: relative;
+  animation: llm-translate-in 0.2s cubic-bezier(0, 0, 0.2, 1) forwards;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(59, 130, 246, 0.1));
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: 1px 0;
+}
+
+@keyframes llm-translate-in {
+  0% {
+    opacity: 0.3;
+    transform: scale(0.95) translateY(2px);
+    filter: blur(1px);
+    box-shadow: 0 0 0 rgba(34, 197, 94, 0.5);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.02) translateY(-0.5px);
+    filter: blur(0px);
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0px);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);
+  }
+}
+
+/* Settled phase - final state with subtle highlight */
+.llm-settled {
+  position: relative;
+  transition: all 0.2s ease;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.05), rgba(59, 130, 246, 0.05));
+  padding: 2px 4px;
+  margin: 1px 0;
+  border-radius: 4px;
+}
+
+/* Hover effects for translated content */
+.llm-settled:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(59, 130, 246, 0.1));
+  transform: translateX(2px);
+  box-shadow: 0 2px 10px rgba(34, 197, 94, 0.15);
+}
+
+/* Error state animation */
+.llm-error {
+  position: relative;
+  animation: llm-error-shake 0.5s ease-in-out;
+  background: rgba(239, 68, 68, 0.1);
+  padding: 2px 4px;
+  margin: 1px 0;
+  border-radius: 4px;
+}
+
+@keyframes llm-error-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: translateX(-2px);
+  }
+  20%,
+  40%,
+  60%,
+  80% {
+    transform: translateX(2px);
+  }
+}
+
+/* Loading spinner for blocks */
+.llm-block-loading {
+  position: relative;
+}
+
+.llm-block-loading::after {
+  content: '';
+  position: absolute;
+  right: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  border-radius: 50%;
+  border-top-color: #6366f1;
+  animation: llm-spin 1s linear infinite;
+}
+
+@keyframes llm-spin {
+  to {
+    transform: translateY(-50%) rotate(360deg);
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .llm-preparing,
+  .llm-translated,
+  .llm-settled {
+    padding: 1px 2px;
+    margin: 0.5px 0;
+  }
+}
+
+/* Dark mode compatibility */
+@media (prefers-color-scheme: dark) {
+  .llm-preparing {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(139, 92, 246, 0.15) 50%,
+      transparent 100%
+    );
+  }
+
+  .llm-translated {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(139, 92, 246, 0.15));
+  }
+
+  .llm-settled {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(139, 92, 246, 0.08));
+  }
+}
+
+/* Show original state - yellow background for original text display */
+.llm-showing-original {
+  background: rgba(255, 193, 7, 0.15) !important;
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+}
+
+/* Accessibility: Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  .llm-preparing,
+  .llm-fading-out,
+  .llm-translated,
+  .llm-settled {
+    animation: none !important;
+    transition: opacity 0.2s ease !important;
+  }
+}

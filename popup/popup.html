@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Line Localization Machine</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="popup-container">
+      <!-- Header with gradient background -->
+      <header class="popup-header">
+        <div class="logo-section">
+          <div class="logo-text">
+            <h1>Line Localization Machine</h1>
+            <p>AI-powered translation 🌐</p>
+          </div>
+          <div class="status-badge" id="statusBadge">
+            <div class="status-dot"></div>
+            <span id="statusText">Ready</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main content area -->
+      <main class="popup-main">
+        <!-- Language selection card -->
+        <div class="card language-card">
+          <div class="card-header">
+            <div class="card-icon">🎯</div>
+            <div class="card-title">Target Language</div>
+          </div>
+          <div class="card-content">
+            <div class="language-selector">
+              <select id="quickLanguage">
+                <option value="">Use Default Language</option>
+                <option value="spanish">🇪🇸 Spanish</option>
+                <option value="french">🇫🇷 French</option>
+                <option value="german">🇩🇪 German</option>
+                <option value="chinese">🇨🇳 Chinese (Simplified)</option>
+                <option value="chinese-traditional">🇹🇼 Chinese (Traditional)</option>
+                <option value="japanese">🇯🇵 Japanese</option>
+                <option value="korean">🇰🇷 Korean</option>
+                <option value="portuguese">🇵🇹 Portuguese</option>
+                <option value="italian">🇮🇹 Italian</option>
+                <option value="russian">🇷🇺 Russian</option>
+                <option value="arabic">🇸🇦 Arabic</option>
+                <option value="hindi">🇮🇳 Hindi</option>
+                <option value="dutch">🇳🇱 Dutch</option>
+                <option value="swedish">🇸🇪 Swedish</option>
+                <option value="norwegian">🇳🇴 Norwegian</option>
+              </select>
+              <div class="select-arrow">
+                <svg width="12" height="8" viewBox="0 0 12 8" fill="none">
+                  <path
+                    d="M1 1L6 6L11 1"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main action button -->
+        <div class="action-section">
+          <button id="translatePage" class="translate-btn">
+            <div class="btn-content">
+              <div class="btn-icon">
+                <svg class="toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 0 1 6.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </div>
+              <span class="btn-text">Translate Page</span>
+            </div>
+            <div class="btn-glow"></div>
+          </button>
+        </div>
+      </main>
+
+      <!-- Footer with settings link -->
+      <footer class="popup-footer">
+        <button id="openSettings" class="settings-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" />
+            <path d="M12 1v6m0 6v6m11-7h-6m-6 0H1" stroke="currentColor" stroke-width="2" />
+          </svg>
+          <span>Settings</span>
+        </button>
+        <div class="version-info">v1.0</div>
+      </footer>
+
+      <!-- Status messages -->
+      <div id="statusMessage" class="status-message">
+        <div class="status-content">
+          <div class="status-icon"></div>
+          <span class="status-text"></span>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

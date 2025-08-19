@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Line Localization Machine - Settings</title>
+    <link rel="icon" type="image/png" href="../assets/icon-32.png" />
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="header-content">
+          <div class="header-title">
+            <img src="../assets/icon-48.png" alt="Line Localization Machine" class="header-icon" />
+            <h1>Line Localization Machine</h1>
+          </div>
+          <p>Configure your translation settings</p>
+        </div>
+      </header>
+
+      <main>
+        <div class="settings-header">
+          <div class="settings-actions">
+            <button id="saveSettings" class="btn-primary">💾 Save Settings</button>
+            <button id="resetSettings" class="btn-danger">🔄 Reset to Defaults</button>
+          </div>
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div class="settings-grid">
+          <!-- API Configuration -->
+          <section class="settings-card">
+            <h2>🔑 API Configuration</h2>
+            <div class="form-group">
+              <label for="apiKey">API Key</label>
+              <input type="password" id="apiKey" placeholder="sk-..." />
+              <small>Your API key is stored locally and never shared</small>
+            </div>
+
+            <div class="form-group">
+              <label for="apiEndpoint">API Endpoint</label>
+              <input type="url" id="apiEndpoint" placeholder="https://api.openai.com/v1" />
+              <small>OpenAI-compatible API endpoint URL</small>
+            </div>
+
+            <div class="form-group">
+              <button id="testConnection" class="btn-secondary">🔍 Test Connection</button>
+            </div>
+          </section>
+
+          <!-- Model Configuration -->
+          <section class="settings-card">
+            <h2>🤖 Model Settings</h2>
+            <div class="form-group">
+              <label for="model">Model</label>
+              <select id="model">
+                <!-- Model options will be populated by JavaScript -->
+                <option value="custom">Custom Model...</option>
+              </select>
+            </div>
+
+            <div class="form-group" id="customModelSection" style="display: none">
+              <label for="customModel">Custom Model ID</label>
+              <input type="text" id="customModel" placeholder="e.g., gpt-4-1106-preview" />
+              <small>Enter the exact model identifier from your API provider</small>
+              <div class="model-examples">
+                <h4>Examples:</h4>
+                <ul>
+                  <li><strong>OpenAI:</strong> gpt-4-1106-preview, gpt-4-turbo-preview</li>
+                  <li><strong>Groq:</strong> mixtral-8x7b-32768, llama2-70b-4096</li>
+                  <li><strong>Perplexity:</strong> llama-3.1-sonar-small-128k-online</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <!-- Language Configuration -->
+          <section class="settings-card">
+            <h2>🌍 Translation Settings</h2>
+            <div class="form-group">
+              <label for="targetLanguage">Default Target Language</label>
+              <select id="targetLanguage">
+                <option value="spanish">🇪🇸 Spanish</option>
+                <option value="french">🇫🇷 French</option>
+                <option value="german">🇩🇪 German</option>
+                <option value="chinese">🇨🇳 Chinese (Simplified)</option>
+                <option value="chinese-traditional">🇹🇼 Chinese (Traditional)</option>
+                <option value="japanese">🇯🇵 Japanese</option>
+                <option value="korean">🇰🇷 Korean</option>
+                <option value="portuguese">🇵🇹 Portuguese</option>
+                <option value="italian">🇮🇹 Italian</option>
+                <option value="russian">🇷🇺 Russian</option>
+                <option value="arabic">🇸🇦 Arabic</option>
+                <option value="hindi">🇮🇳 Hindi</option>
+                <option value="dutch">🇳🇱 Dutch</option>
+                <option value="swedish">🇸🇪 Swedish</option>
+                <option value="norwegian">🇳🇴 Norwegian</option>
+              </select>
+              <small>This will be the default language for new translations</small>
+            </div>
+          </section>
+
+          <!-- Animation Settings -->
+          <section class="settings-card">
+            <h2>✨ Animation Settings</h2>
+            <div class="form-group">
+              <label for="animationSpeed">Animation Speed</label>
+              <select id="animationSpeed">
+                <option value="slow">Slow (Relaxed)</option>
+                <option value="normal">Normal (Recommended)</option>
+                <option value="fast">Fast (Quick)</option>
+              </select>
+              <small>Controls how fast the line-by-line animation plays</small>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="showProgress" />
+                <span class="checkmark"></span>
+                Show translation progress indicator
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="playSound" />
+                <span class="checkmark"></span>
+                Play completion sound
+              </label>
+            </div>
+          </section>
+
+          <!-- Advanced Settings -->
+          <section class="settings-card">
+            <h2>⚙️ Advanced Settings</h2>
+            <div class="form-group">
+              <label for="maxBlockSize">Translation Block Size</label>
+              <select id="maxBlockSize">
+                <option value="5">Small (5 lines) - More API calls, better accuracy</option>
+                <option value="15">Medium (15 lines) - Balanced</option>
+                <option value="30">Large (30 lines) - Fewer API calls, faster</option>
+              </select>
+              <small>How many text lines to group together for translation</small>
+            </div>
+
+            <div class="form-group">
+              <label for="temperature">Translation Creativity</label>
+              <select id="temperature">
+                <option value="0.1">Ultra Conservative (0.1)</option>
+                <option value="0.3">Conservative (0.3)</option>
+                <option value="0.5">Balanced (0.5)</option>
+                <option value="0.85">Creative (0.85)</option>
+                <option value="1.0">Wild (1.0)</option>
+              </select>
+              <small
+                >Lower values = more literal translations, higher = more creative
+                interpretations</small
+              >
+            </div>
+
+            <div class="form-group">
+              <label for="blocksPerRequest">Blocks Per API Request</label>
+              <select id="blocksPerRequest">
+                <option value="3">
+                  3 blocks per request (More requests, better error recovery)
+                </option>
+                <option value="5">5 blocks per request (Balanced)</option>
+                <option value="8">8 blocks per request (Fewer requests, more efficient)</option>
+              </select>
+              <small>How many blocks to combine into a single API call</small>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="settings.js"></script>
+  </body>
+</html>

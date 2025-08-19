@@ -1,0 +1,52 @@
+{
+  "name": "line-localization-machine",
+  "version": "1.0.0",
+  "description": "AI-powered line-by-line webpage translation with stunning animations",
+  "main": "manifest.json",
+  "scripts": {
+    "build": "echo 'No build process needed for this extension'",
+    "dev": "echo 'Load the extension in developer mode'",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "echo 'Add tests when needed'",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "browser-extension",
+    "translation",
+    "ai",
+    "openai",
+    "llm",
+    "animation",
+    "localization"
+  ],
+  "author": "Chuan Jhe Huang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CJHwong/line-localization-machine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CJHwong/line-localization-machine/issues"
+  },
+  "homepage": "https://github.com/CJHwong/line-localization-machine#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "line-localization-machine",
+      "strict_min_version": "109.0"
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.33.0",
+    "eslint": "^9.33.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "husky": "^9.1.7",
+    "prettier": "^3.6.2"
+  }
+}
