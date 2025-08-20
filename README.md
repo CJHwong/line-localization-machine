@@ -10,6 +10,8 @@ A modern browser extension that provides AI-powered line-by-line webpage transla
 - **15 Languages**: Support for major world languages with flag emojis
 - **Bring Your Own Key**: API keys stored locally, never shared
 
+https://github.com/user-attachments/assets/1fdb6a30-c0e3-483d-ba92-3405ca712502
+
 ## 🎯 Usage
 
 1. Navigate to any webpage you want to translate
