@@ -55,7 +55,17 @@ module.exports = [
       'prettier/prettier': 'warn',
 
       // Relaxed rules for development
-      'no-unused-vars': 'warn',
+      'no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern:
+            '^_|^e$|^error$|^tabId$|^sender$|^tabError$|^contentScriptError$|^messageError$|^injectionError$',
+          varsIgnorePattern:
+            '^_|^pingResponse$|^contentScriptError$|^messageError$|^injectionError$',
+          caughtErrorsIgnorePattern:
+            '^_|^e$|^error$|^tabError$|^contentScriptError$|^messageError$|^injectionError$',
+        },
+      ],
       'no-console': 'off',
       'no-debugger': 'warn',
       'no-undef': 'error',
@@ -73,6 +83,79 @@ module.exports = [
       // Browser extension specific allowances
       'no-global-assign': 'off', // Extensions modify global objects
       'no-implicit-globals': 'off', // Extensions use global scope
+    },
+  },
+  // Test files configuration
+  {
+    files: ['tests/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        // Jest globals
+        describe: 'readonly',
+        test: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+        jest: 'readonly',
+
+        // Node.js globals for test files
+        process: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        module: 'readonly',
+        require: 'readonly',
+        exports: 'readonly',
+        global: 'readonly',
+        Buffer: 'readonly',
+
+        // Browser globals for testing
+        window: 'readonly',
+        document: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        chrome: 'readonly',
+        browser: 'readonly',
+      },
+    },
+    plugins: {
+      prettier,
+    },
+    rules: {
+      // Use recommended rules as base but make them loose
+      ...js.configs.recommended.rules,
+
+      // Prettier integration
+      'prettier/prettier': 'warn',
+
+      // More relaxed rules for tests
+      'no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_|^e$|^error$',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_|^e$|^error$',
+        },
+      ],
+      'no-console': 'off',
+      'no-debugger': 'off',
+      'no-undef': 'error',
+      'no-unused-expressions': 'off',
+      'prefer-const': 'warn',
+      'no-var': 'warn',
+
+      // Test-specific allowances
+      'no-inner-declarations': 'off',
+      'no-prototype-builtins': 'off',
+      'no-fallthrough': 'warn',
+      'no-empty': 'off',
+      'no-constant-condition': 'off',
+      'no-global-assign': 'off',
+      'no-implicit-globals': 'off',
     },
   },
   // Apply prettier config to disable conflicting rules
