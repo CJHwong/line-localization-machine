@@ -96,21 +96,22 @@ Before publishing, ensure you have:
 2. **Create Firefox-compatible version**:
 
    ```bash
-   # Create Firefox manifest (minimal changes needed)
-   # Copy current manifest and update browser-specific APIs in code
-   # OR use webextension-polyfill for cross-browser compatibility
+   # Create a clean directory for packaging
+   mkdir firefox-package
+
+   # Copy all required files
+   cp -r assets background content popup settings shared firefox-package/
+   cp manifest.json firefox-package/
+
+   # Remove service_worker line from manifest in firefox-package (Firefox uses scripts array instead)
+   sed -i.bak '/"service_worker"/d' firefox-package/manifest.json
+   rm firefox-package/manifest.json.bak
    ```
 
 3. **Create distribution package**:
 
    ```bash
-   # Create a clean directory for packaging
-   mkdir firefox-package
-
-   # Copy required files (V3 manifest supported)
-   cp -r assets background content popup settings shared firefox-package/ && cp manifest.json firefox-package/
-
-   # Create zip file
+   # Create zip file from firefox-package
    cd firefox-package
    zip -r ../line-localization-machine-firefox.zip .
    cd ..

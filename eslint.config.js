@@ -4,7 +4,14 @@ const prettierConfig = require('eslint-config-prettier');
 
 module.exports = [
   {
-    ignores: ['node_modules/**', 'dist/**', 'build/**', 'web-ext-artifacts/**', 'manifest.json'],
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      'build/**',
+      'web-ext-artifacts/**',
+      'manifest.json',
+      '**/purify.min.js',
+    ],
   },
   {
     files: ['**/*.js'],
@@ -33,6 +40,7 @@ module.exports = [
         alert: 'readonly',
         getComputedStyle: 'readonly',
         eval: 'readonly',
+        DOMPurify: 'readonly',
 
         // Node.js globals (for config files)
         process: 'readonly',

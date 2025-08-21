@@ -35,14 +35,19 @@
   "options_page": "settings/settings.html",
   "web_accessible_resources": [
     {
-      "resources": ["shared/models.js", "shared/api-client.js", "shared/debug.js"],
+      "resources": [
+        "shared/models.js",
+        "shared/api-client.js",
+        "shared/debug.js",
+        "shared/purify.min.js"
+      ],
       "matches": ["<all_urls>"]
     }
   ],
   "browser_specific_settings": {
     "gecko": {
       "id": "line-localization-machine@cjhwong.github.io",
-      "strict_min_version": "109.0"
+      "strict_min_version": "126.0"
     }
   }
 }

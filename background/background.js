@@ -13,27 +13,19 @@ const BrowserAPI = {
     return this.isFirefox ? browser.browserAction : chrome.action;
   },
 
-  // Script injection methods differ
+  // Use modern chrome.scripting API (supported in Firefox 126+ and Chrome)
   async injectScript(tabId, options) {
-    if (this.isFirefox) {
-      return await browser.tabs.executeScript(tabId, options);
-    } else {
-      return await chrome.scripting.executeScript({
-        target: { tabId },
-        files: options.file ? [options.file] : undefined,
-      });
-    }
+    return await chrome.scripting.executeScript({
+      target: { tabId },
+      files: options.file ? [options.file] : undefined,
+    });
   },
 
   async insertCSS(tabId, options) {
-    if (this.isFirefox) {
-      return await browser.tabs.insertCSS(tabId, options);
-    } else {
-      return await chrome.scripting.insertCSS({
-        target: { tabId },
-        files: options.file ? [options.file] : undefined,
-      });
-    }
+    return await chrome.scripting.insertCSS({
+      target: { tabId },
+      files: options.file ? [options.file] : undefined,
+    });
   },
 };
 

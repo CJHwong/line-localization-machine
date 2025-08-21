@@ -60,5 +60,8 @@
     "puppeteer": "^21.0.0",
     "puppeteer-core": "^21.0.0",
     "web-ext": "^7.8.0"
+  },
+  "dependencies": {
+    "dompurify": "^3.2.6"
   }
 }
