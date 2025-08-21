@@ -36,12 +36,11 @@ Before publishing, ensure you have:
    mkdir chrome-package
 
    # Copy required files (exclude development files)
-   cp -r assets/ background/ content/ popup/ settings/ shared/ chrome-package/
-   cp manifest.json chrome-package/
+   cp -r assets background content popup settings shared chrome-package/ && cp manifest.json chrome-package/
 
    # Create zip file
    cd chrome-package
-   zip -r ../line-localization-machine-chrome.zip *
+   zip -r ../line-localization-machine-chrome.zip .
    cd ..
    rm -rf chrome-package
    ```
@@ -85,36 +84,35 @@ Before publishing, ensure you have:
 
 ### Step 2: Prepare Firefox Package
 
-1. **Convert to Firefox-compatible manifest**:
+1. **Firefox Manifest V3 Support**:
 
-   Firefox requires Manifest V2. Create a Firefox-specific manifest:
+   Firefox now supports Manifest V3 (as of Firefox 109). The current manifest.json should work with minimal modifications:
+
+   Key differences for Firefox:
+   - Use `browser.action` instead of `chrome.action` in code
+   - Replace `chrome.scripting` with `browser.scripting`
+   - Use `browser.storage` instead of `chrome.storage`
+
+2. **Create Firefox-compatible version**:
 
    ```bash
-   # Create Firefox manifest (convert from V3 to V2)
-   # Note: You'll need to manually convert manifest.json to V2 format
-   # Key changes needed:
-   # - Change "manifest_version": 3 to 2
-   # - Replace "action" with "browser_action"
-   # - Convert "service_worker" to "scripts" in background
-   # - Update permissions format
+   # Create Firefox manifest (minimal changes needed)
+   # Copy current manifest and update browser-specific APIs in code
+   # OR use webextension-polyfill for cross-browser compatibility
    ```
 
-2. **Create distribution package**:
+3. **Create distribution package**:
 
    ```bash
    # Create a clean directory for packaging
    mkdir firefox-package
 
-   # Copy required files
-   cp -r assets/ background/ content/ popup/ settings/ shared/ firefox-package/
-
-   # Copy Firefox-compatible manifest
-   # (You'll need to create manifest-firefox.json first)
-   cp manifest-firefox.json firefox-package/manifest.json
+   # Copy required files (V3 manifest supported)
+   cp -r assets background content popup settings shared firefox-package/ && cp manifest.json firefox-package/
 
    # Create zip file
    cd firefox-package
-   zip -r ../line-localization-machine-firefox.zip *
+   zip -r ../line-localization-machine-firefox.zip .
    cd ..
    rm -rf firefox-package
    ```
@@ -133,7 +131,7 @@ Before publishing, ensure you have:
    - **Categories**: Select relevant categories
 
 3. **Additional Information**:
-   - **Homepage**: <https://github.com/CJHwong/line-localization-machine>
+   - **Homepage**: Link to project repository or website
    - **Support Email**: Contact email for user support
    - **License**: MIT License (as specified in package.json)
 
@@ -165,7 +163,7 @@ Before publishing, ensure you have:
    - Set `DEBUG = false` in `shared/debug.js`
    - Run `npm run lint:fix && npm run format`
    - Test in both browsers
-   - Create Firefox-compatible manifest if needed
+   - Update browser-specific API calls if needed (chrome._ vs browser._)
 3. **Create Packages**: Follow the same packaging steps above
 4. **Submit Updates**: Upload new versions to respective stores
 
@@ -182,7 +180,7 @@ npm version minor  # for new features
 npm version major  # for breaking changes
 
 # Then manually sync the version to manifest.json
-# For Firefox, also update manifest-firefox.json if using separate file
+# Both Chrome and Firefox can use the same manifest.json (V3)
 ```
 
 ## Marketing Assets

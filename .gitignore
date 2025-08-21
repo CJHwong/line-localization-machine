@@ -55,6 +55,8 @@ coverage/
 *.zip
 *.crx
 *.xpi
+chrome-package/
+firefox-package/
 
 # API keys and secrets
 config/secrets.js
