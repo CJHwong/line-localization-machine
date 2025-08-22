@@ -40,7 +40,6 @@ module.exports = [
         alert: 'readonly',
         getComputedStyle: 'readonly',
         eval: 'readonly',
-        DOMPurify: 'readonly',
 
         // Node.js globals (for config files)
         process: 'readonly',

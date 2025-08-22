@@ -35,12 +35,7 @@
   "options_page": "settings/settings.html",
   "web_accessible_resources": [
     {
-      "resources": [
-        "shared/models.js",
-        "shared/api-client.js",
-        "shared/debug.js",
-        "shared/purify.min.js"
-      ],
+      "resources": ["shared/models.js", "shared/api-client.js", "shared/debug.js"],
       "matches": ["<all_urls>"]
     }
   ],

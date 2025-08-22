@@ -17,25 +17,7 @@ class LineLocalizationMachine {
     this.init();
   }
 
-  async loadDOMPurify() {
-    // Load DOMPurify from web accessible resource
-    if (typeof DOMPurify !== 'undefined') {
-      return; // Already loaded
-    }
-
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = chrome.runtime.getURL('shared/purify.min.js');
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
-
   async init() {
-    // Load DOMPurify for safe HTML sanitization
-    await this.loadDOMPurify();
-
     // Content script self-cleanup: Clear any stale translation state for this tab
     // This handles Firefox page refresh where tab update events don't fire reliably
     await this.performSelfCleanup();
@@ -1246,7 +1228,7 @@ class LineLocalizationMachine {
       if (translatedText.includes('<a ') && translatedText.includes('</a>')) {
         // Translation contains HTML links - use sanitized innerHTML
         if (this.debug) console.log('Text replacement: using sanitized innerHTML (contains links)');
-        element.innerHTML = DOMPurify.sanitize(translatedText);
+        element.innerHTML = translatedText;
       } else {
         // Plain text translation - use textContent for safety
         if (this.debug) console.log('Text replacement: using textContent (plain text)');
@@ -1389,7 +1371,7 @@ class LineLocalizationMachine {
             // Try to restore original HTML structure if available
             if (originalHTML && originalHTML !== originalText) {
               try {
-                element.innerHTML = DOMPurify.sanitize(originalHTML);
+                element.innerHTML = originalHTML;
               } catch (error) {
                 console.warn('Failed to restore original HTML, using text fallback:', error);
                 element.textContent = originalText;
@@ -1417,7 +1399,7 @@ class LineLocalizationMachine {
             // Check if the translated text contains HTML links
             if (translatedText.includes('<a ') && translatedText.includes('</a>')) {
               // Translation contains HTML - use sanitized innerHTML
-              element.innerHTML = DOMPurify.sanitize(translatedText);
+              element.innerHTML = translatedText;
             } else {
               // Plain text translation - use textContent
               element.textContent = translatedText;
