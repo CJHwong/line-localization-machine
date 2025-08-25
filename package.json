@@ -16,7 +16,12 @@
     "test:integration": "jest tests/integration",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "test:mock-server": "node tests/mock-server/server.js",
-    "prepare": "husky"
+    "prepare": "husky",
+    "pack:chrome": "bash scripts/package-chrome.sh",
+    "pack:firefox": "bash scripts/package-firefox.sh",
+    "pack": "bash scripts/package-all.sh",
+    "prepublish:check": "bash scripts/prepublish-checks.sh",
+    "publish:prep": "npm run prepublish:check && npm run pack"
   },
   "keywords": [
     "browser-extension",
