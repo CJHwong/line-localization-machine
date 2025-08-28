@@ -2,6 +2,12 @@
 
 A modern browser extension that provides AI-powered line-by-line webpage translation with intelligent batching, pipeline processing, and subtle animations.
 
+## 📥 Install
+
+[![Available in the Chrome Web Store](https://developer.chrome.com/static/docs/webstore/branding/image/tbyBjqi7Zu733AAKA5n4.png)](https://chromewebstore.google.com/detail/line-localization-machine/ndofgkefebkmliigcmgmbmamilkjjjla?hl=zh-tw)
+
+[![Get the add-on for Firefox](https://blog.mozilla.org/addons/files/2015/11/get-the-addon-small.png)](https://addons.mozilla.org/en-US/firefox/addon/line-localization-machine/)
+
 ## ✨ Features
 
 - **OpenAI Compatible**: Works with OpenAI API and other compatible endpoints
@@ -10,7 +16,7 @@ A modern browser extension that provides AI-powered line-by-line webpage transla
 - **15 Languages**: Support for major world languages with flag emojis
 - **Bring Your Own Key**: API keys stored locally, never shared
 
-https://github.com/user-attachments/assets/1fdb6a30-c0e3-483d-ba92-3405ca712502
+<https://github.com/user-attachments/assets/1fdb6a30-c0e3-483d-ba92-3405ca712502>
 
 ## 🎯 Usage
 
