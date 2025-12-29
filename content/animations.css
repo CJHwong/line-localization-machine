@@ -1,50 +1,45 @@
 /* Line Localization Machine - Animation Styles */
 
-/* Preparing phase - subtle pulse indicating analysis */
+/* Preparing phase - gentle pulse indicating waiting for translation */
 .llm-preparing {
   position: relative;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  background: linear-gradient(90deg, transparent 0%, rgba(99, 102, 241, 0.1) 50%, transparent 100%);
-  background-size: 200% 100%;
-  animation: llm-scan 1s ease-in-out infinite;
+  background-color: rgba(99, 102, 241, 0.06);
+  border-radius: 3px;
+  animation: llm-pulse 3s ease-in-out infinite;
 }
 
-@keyframes llm-scan {
-  0% {
-    background-position: -200% 0;
-  }
+@keyframes llm-pulse {
+  0%,
   100% {
-    background-position: 200% 0;
+    background-color: rgba(99, 102, 241, 0.04);
+  }
+  50% {
+    background-color: rgba(99, 102, 241, 0.12);
   }
 }
 
 /* Fade out phase - content disappearing */
 .llm-fading-out {
   position: relative;
-  animation: llm-fade-out 0.15s cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: llm-fade-out 0.06s cubic-bezier(0.4, 0, 1, 1) forwards;
   overflow: hidden;
 }
 
 @keyframes llm-fade-out {
   0% {
     opacity: 1;
-    transform: scale(1) translateY(0);
-    filter: blur(0px);
-  }
-  50% {
-    transform: scale(0.98) translateY(-0.5px);
+    transform: scale(1);
   }
   100% {
-    opacity: 0.3;
-    transform: scale(0.95) translateY(0);
-    filter: blur(1px);
+    opacity: 0.4;
+    transform: scale(0.98);
   }
 }
 
 /* Translated phase - content appearing with glow */
 .llm-translated {
   position: relative;
-  animation: llm-translate-in 0.2s cubic-bezier(0, 0, 0.2, 1) forwards;
+  animation: llm-translate-in 0.08s cubic-bezier(0, 0, 0.2, 1) forwards;
   background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(59, 130, 246, 0.1));
   border-radius: 4px;
   padding: 2px 4px;
@@ -53,29 +48,20 @@
 
 @keyframes llm-translate-in {
   0% {
-    opacity: 0.3;
-    transform: scale(0.95) translateY(2px);
-    filter: blur(1px);
-    box-shadow: 0 0 0 rgba(34, 197, 94, 0.5);
-  }
-  50% {
-    opacity: 0.8;
-    transform: scale(1.02) translateY(-0.5px);
-    filter: blur(0px);
-    box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+    opacity: 0.4;
+    transform: scale(0.98);
   }
   100% {
     opacity: 1;
-    transform: scale(1) translateY(0);
-    filter: blur(0px);
-    box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);
+    transform: scale(1);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.15);
   }
 }
 
 /* Settled phase - final state with subtle highlight */
 .llm-settled {
   position: relative;
-  transition: all 0.2s ease;
+  transition: all 0.1s ease;
   background: linear-gradient(135deg, rgba(34, 197, 94, 0.05), rgba(59, 130, 246, 0.05));
   padding: 2px 4px;
   margin: 1px 0;
@@ -92,7 +78,7 @@
 /* Error state animation */
 .llm-error {
   position: relative;
-  animation: llm-error-shake 0.5s ease-in-out;
+  animation: llm-error-shake 0.3s ease-in-out;
   background: rgba(239, 68, 68, 0.1);
   padding: 2px 4px;
   margin: 1px 0;
@@ -157,12 +143,17 @@
 /* Dark mode compatibility */
 @media (prefers-color-scheme: dark) {
   .llm-preparing {
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(139, 92, 246, 0.15) 50%,
-      transparent 100%
-    );
+    background-color: rgba(139, 92, 246, 0.08);
+  }
+
+  @keyframes llm-pulse {
+    0%,
+    100% {
+      background-color: rgba(139, 92, 246, 0.06);
+    }
+    50% {
+      background-color: rgba(139, 92, 246, 0.15);
+    }
   }
 
   .llm-translated {
