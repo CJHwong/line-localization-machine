@@ -406,6 +406,7 @@ class BackgroundScript {
           temperature: settings.temperature !== undefined ? settings.temperature : 0.3,
           maxTokens: Math.min(2000, Math.max(100, text.length * 2)),
           timeout: 30000,
+          reasoningEffort: settings.reasoningEffort || 'off',
         }
       );
 

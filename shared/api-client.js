@@ -46,7 +46,12 @@ export default class APIClient {
    * @returns {Promise<Object>} API response with success/error status
    */
   static async chatCompletion(config, messages, options = {}) {
-    const { temperature = 0.3, maxTokens = 2000, timeout = 30000 } = options;
+    const {
+      temperature = 0.3,
+      maxTokens = 2000,
+      timeout = 30000,
+      reasoningEffort = 'off',
+    } = options;
 
     // Validate required config
     if (!config.apiKey) {
@@ -67,8 +72,12 @@ export default class APIClient {
       messages: messages,
       temperature: temperature,
       max_completion_tokens: maxTokens,
-      reasoning_effort: 'low',
     };
+
+    // Only add reasoning_effort if enabled (not 'off')
+    if (reasoningEffort && reasoningEffort !== 'off') {
+      requestBody.reasoning_effort = reasoningEffort;
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -144,9 +153,11 @@ export default class APIClient {
   /**
    * Test API connection with a simple request
    * @param {Object} config - API configuration
+   * @param {Object} options - Additional options
+   * @param {string} options.reasoningEffort - Reasoning effort level (default: 'off')
    * @returns {Promise<Object>} Test result with success status and response
    */
-  static async testConnection(config) {
+  static async testConnection(config, options = {}) {
     try {
       const messages = [
         {
@@ -158,8 +169,8 @@ export default class APIClient {
       const result = await this.chatCompletion(config, messages, {
         maxTokens: 50,
         temperature: 1,
-        reasoning_effort: 'low',
         timeout: 15000, // Shorter timeout for connection test
+        reasoningEffort: options.reasoningEffort || 'off',
       });
 
       return {
@@ -321,6 +332,7 @@ ${translationHistory
         temperature: options.temperature !== undefined ? options.temperature : 0.3,
         maxTokens: options.maxTokens || 2000,
         timeout: options.timeout || 30000,
+        reasoningEffort: options.reasoningEffort || 'off',
       });
 
       return {

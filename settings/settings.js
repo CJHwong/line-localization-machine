@@ -17,6 +17,7 @@ class SettingsController {
       playSound: document.getElementById('playSound'),
       maxBlockSize: document.getElementById('maxBlockSize'),
       temperature: document.getElementById('temperature'),
+      reasoningEffort: document.getElementById('reasoningEffort'),
       blocksPerRequest: document.getElementById('blocksPerRequest'),
       testConnection: document.getElementById('testConnection'),
       saveSettings: document.getElementById('saveSettings'),
@@ -86,6 +87,7 @@ class SettingsController {
       } else {
         this.elements.temperature.value = tempValue.toString();
       }
+      this.elements.reasoningEffort.value = mergedSettings.reasoningEffort || 'off';
       this.elements.blocksPerRequest.value = mergedSettings.blocksPerRequest.toString();
 
       // Handle model selection
@@ -126,6 +128,7 @@ class SettingsController {
       this.elements.playSound,
       this.elements.maxBlockSize,
       this.elements.temperature,
+      this.elements.reasoningEffort,
       this.elements.blocksPerRequest,
     ];
 
@@ -170,6 +173,7 @@ class SettingsController {
         playSound: this.elements.playSound.checked,
         maxBlockSize: parseInt(this.elements.maxBlockSize.value),
         temperature: parseFloat(this.elements.temperature.value),
+        reasoningEffort: this.elements.reasoningEffort.value,
         blocksPerRequest: parseInt(this.elements.blocksPerRequest.value),
       };
 
@@ -208,11 +212,16 @@ class SettingsController {
       this.showStatus('Testing API connection...', 'loading');
 
       // Use centralized API client for connection test
-      const result = await APIClient.testConnection({
-        apiKey: apiKey,
-        apiEndpoint: apiEndpoint,
-        model: actualModel,
-      });
+      const result = await APIClient.testConnection(
+        {
+          apiKey: apiKey,
+          apiEndpoint: apiEndpoint,
+          model: actualModel,
+        },
+        {
+          reasoningEffort: this.elements.reasoningEffort.value,
+        }
+      );
 
       if (result.success) {
         this.showStatus(

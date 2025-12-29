@@ -161,6 +161,22 @@
             </div>
 
             <div class="form-group">
+              <label for="reasoningEffort">Reasoning Effort</label>
+              <select id="reasoningEffort">
+                <option value="off">Off - Don't send (Default)</option>
+                <option value="none">None</option>
+                <option value="minimal">Minimal</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+              <small
+                >Controls how much reasoning the model does before responding (for o1/o3
+                models)</small
+              >
+            </div>
+
+            <div class="form-group">
               <label for="blocksPerRequest">Blocks Per API Request</label>
               <select id="blocksPerRequest">
                 <option value="3">
