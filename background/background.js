@@ -8,9 +8,13 @@ const BrowserAPI = {
     return typeof browser !== 'undefined';
   },
 
-  // Action API still differs between browsers
+  // Action API - Firefox MV3 uses browser.action, older Firefox uses browserAction
   get action() {
-    return this.isFirefox ? browser.browserAction : chrome.action;
+    if (this.isFirefox) {
+      // Firefox MV3 uses browser.action, fallback to browserAction for older versions
+      return browser.action || browser.browserAction;
+    }
+    return chrome.action;
   },
 
   // Use modern chrome.scripting API (supported in Firefox 126+ and Chrome)
@@ -389,23 +393,38 @@ class BackgroundScript {
   }
 
   async handleTranslationRequest(message, sender) {
-    const { text, settings, translationHistory = [] } = message;
+    const { translationData, settings } = message;
+
+    // Validate translationData structure
+    if (!translationData || !translationData.blocks || !Array.isArray(translationData.blocks)) {
+      return {
+        success: false,
+        error: 'Invalid translation data: missing blocks array',
+        errorType: 'client_error',
+        isRetryable: false,
+      };
+    }
 
     try {
-      // Use centralized API client for translation with context
+      // Calculate appropriate max tokens based on content size
+      const totalChars = translationData.blocks.reduce(
+        (sum, b) => sum + b.items.reduce((s, item) => s + item.length, 0),
+        0
+      );
+      const maxTokens = Math.min(8000, Math.max(1000, totalChars * 3));
+
+      // Use centralized API client for JSON-based translation
       const result = await this.APIClient.translate(
         {
           apiKey: settings.apiKey,
           apiEndpoint: settings.apiEndpoint,
           model: settings.model,
         },
-        text,
-        this.getLanguageName(settings.targetLanguage), // Convert language code to display name
+        translationData, // { targetLanguage, blocks: [{id, items}, ...] }
         {
-          translationHistory: translationHistory, // Pass translation history for context
           temperature: settings.temperature !== undefined ? settings.temperature : 0.3,
-          maxTokens: Math.min(2000, Math.max(100, text.length * 2)),
-          timeout: 30000,
+          maxTokens: maxTokens,
+          timeout: 60000, // Longer timeout for larger batches
           reasoningEffort: settings.reasoningEffort || 'off',
         }
       );
@@ -413,7 +432,7 @@ class BackgroundScript {
       if (result.success) {
         return {
           success: true,
-          translatedText: result.translatedText,
+          blocks: result.blocks,
           usage: result.usage,
           model: result.model,
         };

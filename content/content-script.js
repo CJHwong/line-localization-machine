@@ -367,7 +367,7 @@ class LineLocalizationMachine {
     }
 
     // Process blocks in batches based on user setting (blocks per API request)
-    const blocksPerRequest = this.translationSettings.blocksPerRequest || 5;
+    const blocksPerRequest = this.translationSettings.blocksPerRequest || 15;
     let completedCount = 0;
 
     // Create batches
@@ -376,45 +376,18 @@ class LineLocalizationMachine {
       batches.push(textBlocks.slice(i, i + blocksPerRequest));
     }
 
-    // Pipeline: start first translation request
-    const translationQueue = [];
-    let nextBatchIndex = 0;
+    // Pipeline processing: fire next batch request while animating current batch
+    let nextBatchPromise = null;
 
-    // Helper function to start next translation
-    const startNextTranslation = () => {
-      if (nextBatchIndex < batches.length) {
-        const batch = batches[nextBatchIndex];
-        nextBatchIndex++;
-
-        // Start translation in background
-        const translationPromise = this.translateMultipleBlocks(batch)
-          .then(result => ({ success: true, batch, result }))
-          .catch(error => {
-            // If this is a fatal error, don't catch it - let it bubble up immediately
-            if (error.isFatalError) {
-              console.error('Fatal error in translation promise, re-throwing:', error);
-              throw error; // This will cause the promise to reject with the fatal error
-            }
-            return { success: false, batch, error };
-          });
-
-        translationQueue.push(translationPromise);
-        return translationPromise;
-      }
-      return null;
-    };
-
-    // Start first 2 translations immediately for better pipeline
-    startNextTranslation(); // Batch 0
-    if (batches.length > 1) {
-      startNextTranslation(); // Batch 1 (get ahead of animations)
-    }
-
-    // Process each batch
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
+      const nextBatch = batches[batchIndex + 1];
 
-      // Start animations for all blocks in current batch
+      console.log(
+        `[LLM] Starting batch ${batchIndex}/${batches.length - 1}, ${batch.length} blocks`
+      );
+
+      // Start animations for current batch
       batch.forEach(block => {
         try {
           this.animateBlockStart(block);
@@ -423,15 +396,42 @@ class LineLocalizationMachine {
         }
       });
 
-      // Start translation for batch that's 2 ahead (more pipeline lookahead)
-      if (batchIndex + 2 < batches.length && translationQueue.length <= batchIndex + 2) {
-        startNextTranslation();
+      // Get translation for current batch
+      let translationResult;
+      try {
+        if (batchIndex === 0 || !nextBatchPromise) {
+          // First batch or no pending promise: start fresh request
+          console.log(`[LLM] Batch ${batchIndex}: Starting fresh translation request`);
+          const result = await this.translateMultipleBlocks(batch);
+          translationResult = { success: true, result };
+        } else {
+          // Use the already-started request from previous iteration
+          console.log(`[LLM] Batch ${batchIndex}: Awaiting pending translation request`);
+          const result = await nextBatchPromise;
+          translationResult = { success: true, result };
+        }
+        console.log(
+          `[LLM] Batch ${batchIndex}: Got ${translationResult.result?.length || 0} translated blocks`
+        );
+      } catch (error) {
+        console.error(`[LLM] Batch ${batchIndex}: Translation error:`, error);
+        if (error.isFatalError) {
+          throw error;
+        }
+        translationResult = { success: false, error };
+      }
+
+      // Pipeline: start next batch request NOW (runs in parallel with animation below)
+      if (nextBatch) {
+        console.log(
+          `[LLM] Batch ${batchIndex}: Starting pipeline request for batch ${batchIndex + 1}`
+        );
+        nextBatchPromise = this.translateMultipleBlocks(nextBatch);
+      } else {
+        nextBatchPromise = null;
       }
 
       try {
-        // Wait for current batch translation to complete
-        const translationResult = await translationQueue[batchIndex];
-
         if (translationResult.success) {
           const batchTranslations = translationResult.result;
 
@@ -444,7 +444,6 @@ class LineLocalizationMachine {
               await this.animateTranslation(block, blockTranslations);
             } catch (animationError) {
               console.warn('Error animating block translation:', animationError);
-              // Continue with the next block even if animation fails
             }
 
             // Update progress
@@ -462,11 +461,6 @@ class LineLocalizationMachine {
               totalBlocks: textBlocks.length,
               completedBlocks: completedCount,
             });
-
-            // Small delay between block animations
-            if (j < batch.length - 1) {
-              await this.delay(15);
-            }
           }
         } else {
           // Handle translation error
@@ -496,7 +490,6 @@ class LineLocalizationMachine {
               this.hideTranslationProgress();
             }
 
-            // Throw the error to stop the entire translation process
             throw translationResult.error;
           }
 
@@ -507,7 +500,6 @@ class LineLocalizationMachine {
             this.completedBlocks = completedCount;
             this.updateTranslationProgress(completedCount, textBlocks.length);
 
-            // Update persistent state
             this.updateTranslationState({
               isTranslating: true,
               status: 'translating',
@@ -518,22 +510,18 @@ class LineLocalizationMachine {
           });
         }
       } catch (error) {
-        // Check if this is a fatal error that should stop the entire translation
         if (error.isFatalError) {
           console.error('Fatal error in translation loop, stopping:', error);
-          // Re-throw the fatal error to stop the entire translation process
           throw error;
         }
 
         console.warn('Unexpected batch error:', error);
-        // Mark all blocks in batch as error
         batch.forEach(block => {
           this.animateBlockError(block);
           completedCount++;
           this.completedBlocks = completedCount;
           this.updateTranslationProgress(completedCount, textBlocks.length);
 
-          // Update persistent state
           this.updateTranslationState({
             isTranslating: true,
             status: 'translating',
@@ -542,11 +530,6 @@ class LineLocalizationMachine {
             completedBlocks: completedCount,
           });
         });
-      }
-
-      // Small delay between batches for smooth progression
-      if (batchIndex + 1 < batches.length) {
-        await this.delay(50);
       }
     }
 
@@ -867,190 +850,96 @@ class LineLocalizationMachine {
     // Prepare link placeholder mapping
     const linkMap = {};
 
-    // Combine all blocks into a single request with clear separators
-    const blockTexts = blocks.map(block => {
-      return block
-        .map(item => {
+    // Build JSON structure for translation
+    const translationData = {
+      targetLanguage: this.getLanguageName(this.translationSettings.targetLanguage),
+      blocks: blocks.map((block, blockIndex) => ({
+        id: blockIndex,
+        items: block.map(item => {
           // Use HTML with placeholders for elements with links, otherwise use text
-          let textToTranslate;
           if (item.hasLinks && item.originalHTML) {
-            textToTranslate = this.replaceLinksWithPlaceholders(item.originalHTML, linkMap);
-          } else {
-            textToTranslate = item.originalText;
+            const textWithPlaceholders = this.replaceLinksWithPlaceholders(
+              item.originalHTML,
+              linkMap
+            );
+            if (this.debug) {
+              console.log('Item with links:', {
+                originalText: item.originalText,
+                originalHTML: item.originalHTML,
+                textWithPlaceholders,
+              });
+            }
+            return textWithPlaceholders;
           }
-
-          if (this.debug && item.hasLinks) {
-            console.log('Item with links:', {
-              originalText: item.originalText,
-              originalHTML: item.originalHTML,
-              textToTranslate: textToTranslate,
-            });
-          }
-
-          return textToTranslate;
-        })
-        .join('\n\n||ITEM_SEPARATOR||\n\n');
-    });
-
-    // Use a unique separator between blocks
-    const combinedText = blockTexts.join('\n\n===BLOCK_SEPARATOR===\n\n');
+          return item.originalText;
+        }),
+      })),
+    };
 
     try {
-      const translatedText = await this.callTranslationAPI(combinedText);
-
-      // Debug logging for separator issues
-      if (this.debug && translatedText.includes('===BLOCK_SEPARATOR===')) {
-        console.log('Separator debug - original blocks:', blocks.length);
-        console.log(
-          'Separator debug - translation contains separators:',
-          translatedText.includes('===BLOCK_SEPARATOR===')
-        );
-        console.log('Separator debug - full translation:', translatedText);
-      }
-
-      // Split back into blocks - handle variations in separator formatting
-      let translatedBlocks = translatedText.split('\n\n===BLOCK_SEPARATOR===\n\n');
-
-      // Fallback: try without double newlines if exact match failed
-      if (translatedBlocks.length === 1 && translatedText.includes('===BLOCK_SEPARATOR===')) {
-        if (this.debug) console.log('Separator debug: trying fallback without double newlines');
-        translatedBlocks = translatedText.split('===BLOCK_SEPARATOR===');
-      }
-
-      // Additional fallback: try with single newlines
-      if (translatedBlocks.length === 1 && translatedText.includes('===BLOCK_SEPARATOR===')) {
-        if (this.debug) console.log('Separator debug: trying fallback with single newlines');
-        translatedBlocks = translatedText.split('\n===BLOCK_SEPARATOR===\n');
-      }
+      // Call translation API with JSON data
+      const result = await this.callTranslationAPI(translationData);
 
       if (this.debug) {
-        console.log('Separator debug - final block count:', translatedBlocks.length);
+        console.log('Translation result:', {
+          success: result.success,
+          blockCount: result.blocks?.length,
+          expectedBlocks: blocks.length,
+        });
+      }
+
+      // Validate response structure
+      if (!result.success || !result.blocks) {
+        throw new Error(result.error || 'Translation failed - no blocks returned');
       }
 
       // Process each translated block
       const results = [];
       for (let i = 0; i < blocks.length; i++) {
         const originalBlock = blocks[i];
-        const translatedBlockText = translatedBlocks[i] || blockTexts[i];
+        const translatedBlock = result.blocks.find(b => b.id === i) || result.blocks[i];
 
-        // Split the translated block back into individual texts using item separator
-        let translatedParts = translatedBlockText
-          .split('\n\n||ITEM_SEPARATOR||\n\n')
-          .map(part => (typeof part === 'string' ? part : '').trim())
-          .filter(part => part.length > 0);
-
-        // Fallback: try without double newlines if exact match failed
-        if (translatedParts.length === 1 && translatedBlockText.includes('||ITEM_SEPARATOR||')) {
-          translatedParts = translatedBlockText
-            .split('||ITEM_SEPARATOR||')
-            .map(part => (typeof part === 'string' ? part : '').trim())
-            .filter(part => part.length > 0);
+        if (!translatedBlock || !translatedBlock.items) {
+          console.warn(`Missing translation for block ${i}, using original`);
+          results.push(originalBlock.map(item => item.originalText));
+          continue;
         }
 
-        // Additional fallback: try with single newlines
-        if (translatedParts.length === 1 && translatedBlockText.includes('||ITEM_SEPARATOR||')) {
-          translatedParts = translatedBlockText
-            .split('\n||ITEM_SEPARATOR||\n')
-            .map(part => (typeof part === 'string' ? part : '').trim())
-            .filter(part => part.length > 0);
-        }
-
-        // Restore links from placeholders in translated parts
-        translatedParts = translatedParts.map((part, partIndex) => {
+        // Get translated items and restore links
+        let translatedItems = translatedBlock.items.map((item, itemIndex) => {
           try {
-            const restoredPart = this.restoreLinksFromPlaceholders(part, linkMap);
-
-            if (this.debug && part !== restoredPart) {
-              console.log(`Link restoration for part ${partIndex}:`, {
-                original: part,
-                restored: restoredPart,
-                containsLinks: restoredPart.includes('<a '),
+            const restored = this.restoreLinksFromPlaceholders(item, linkMap);
+            if (this.debug && item !== restored) {
+              console.log(`Link restoration for block ${i}, item ${itemIndex}:`, {
+                original: item,
+                restored,
               });
             }
-
-            return restoredPart;
+            return restored;
           } catch (error) {
-            console.warn(`Error restoring links for part ${partIndex}:`, error);
-            return part; // Return original part if restoration fails
+            console.warn(`Error restoring links for block ${i}, item ${itemIndex}:`, error);
+            return item;
           }
         });
 
-        // Enhanced fallback logic for missing/mismatched parts
-        if (translatedParts.length !== originalBlock.length) {
+        // Handle item count mismatch
+        if (translatedItems.length !== originalBlock.length) {
           console.warn(
-            `Translation mismatch: expected ${originalBlock.length} parts, got ${translatedParts.length}`
+            `Item count mismatch in block ${i}: expected ${originalBlock.length}, got ${translatedItems.length}`
           );
 
-          if (this.debug) {
-            console.log('Item separator debug - original block text:', blockTexts[i]);
-            console.log('Item separator debug - translated block text:', translatedBlockText);
-            console.log(
-              'Item separator debug - contains item separators:',
-              translatedBlockText.includes('||ITEM_SEPARATOR||')
-            );
-            console.log(
-              'Item separator debug - translated parts (after link restoration):',
-              translatedParts
-            );
-          }
-
-          if (translatedParts.length === 1 && originalBlock.length > 1) {
-            // Single translation for multiple items - try to split intelligently
-            const singleTranslation = translatedParts[0];
-
-            // Try splitting by sentence boundaries or paragraphs
-            const sentences = singleTranslation
-              .split(/[.!?]\s+/)
-              .filter(s => s && typeof s === 'string' && s.trim());
-            const paragraphs = singleTranslation
-              .split('\n\n')
-              .filter(p => p && typeof p === 'string' && p.trim());
-
-            if (sentences.length === originalBlock.length) {
-              translatedParts = sentences.map(
-                s => (typeof s === 'string' ? s : '').trim() + (s.match(/[.!?]$/) ? '' : '.')
-              );
-            } else if (paragraphs.length === originalBlock.length) {
-              translatedParts = paragraphs.map(p => (typeof p === 'string' ? p : '').trim());
-            } else {
-              // Split proportionally by character length
-              const avgLength = Math.ceil(singleTranslation.length / originalBlock.length);
-              translatedParts = [];
-              let remaining = singleTranslation;
-
-              for (let j = 0; j < originalBlock.length - 1; j++) {
-                const splitIndex = Math.min(avgLength, remaining.length);
-                // Try to split at word boundary
-                const wordBoundary = remaining.lastIndexOf(' ', splitIndex);
-                const cutIndex = wordBoundary > splitIndex * 0.7 ? wordBoundary : splitIndex;
-
-                translatedParts.push((remaining.substring(0, cutIndex) || '').trim());
-                remaining = (remaining.substring(cutIndex) || '').trim();
-              }
-              translatedParts.push(remaining); // Add the rest
+          if (translatedItems.length < originalBlock.length) {
+            // Pad with original texts
+            while (translatedItems.length < originalBlock.length) {
+              translatedItems.push(originalBlock[translatedItems.length].originalText);
             }
-          } else if (translatedParts.length > originalBlock.length) {
-            // More translations than original items - merge extras
-            const merged = translatedParts.slice(0, originalBlock.length - 1);
-            const lastParts = translatedParts.slice(originalBlock.length - 1);
-            merged.push((lastParts.join(' ') || '').trim());
-            translatedParts = merged;
           } else {
-            // Still mismatched - pad with original texts
-            while (translatedParts.length < originalBlock.length) {
-              const missingIndex = translatedParts.length;
-              translatedParts.push(originalBlock[missingIndex].originalText);
-            }
+            // Truncate extra items
+            translatedItems = translatedItems.slice(0, originalBlock.length);
           }
         }
 
-        // Ensure we still have the exact number of parts
-        if (translatedParts.length !== originalBlock.length) {
-          console.warn('Final fallback: using original texts for block', i);
-          results.push(originalBlock.map(item => item.originalText));
-        } else {
-          results.push(translatedParts);
-        }
+        results.push(translatedItems);
       }
 
       return results;
@@ -1095,31 +984,27 @@ class LineLocalizationMachine {
     return languageMap[languageCode] || languageCode;
   }
 
-  async callTranslationAPI(text) {
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      return text || '';
+  async callTranslationAPI(translationData) {
+    // translationData = { targetLanguage, blocks: [{id, items}, ...] }
+    if (!translationData || !translationData.blocks || translationData.blocks.length === 0) {
+      return { success: false, error: 'No translation data provided' };
     }
-
-    // Content scripts use background script for API calls
-
-    const targetLanguageName = this.getLanguageName(this.translationSettings.targetLanguage);
 
     try {
       if (this.debug) {
         console.log('Translation request via background script:', {
           model: this.translationSettings.model,
-          targetLanguage: targetLanguageName,
-          textLength: text.length,
-          historyEntries: this.translationHistory.length,
+          targetLanguage: translationData.targetLanguage,
+          blockCount: translationData.blocks.length,
+          totalItems: translationData.blocks.reduce((sum, b) => sum + b.items.length, 0),
         });
       }
 
       // Use background script for API calls (it has the centralized API client)
       const result = await chrome.runtime.sendMessage({
         action: 'TRANSLATE_REQUEST',
-        text: text,
+        translationData: translationData,
         settings: this.translationSettings,
-        translationHistory: this.translationHistory, // Pass context for better translations
       });
 
       if (!result || !result.success) {
@@ -1149,28 +1034,13 @@ class LineLocalizationMachine {
         throw error;
       }
 
-      const translatedText = result.translatedText;
-
-      // Safety check for translatedText
-      if (typeof translatedText !== 'string') {
-        throw new Error(
-          `Invalid translation result: expected string, got ${typeof translatedText}`
-        );
-      }
-
-      // Add this translation to history for future context
-      this.translationHistory.push({
-        original: text,
-        translated: translatedText,
-        timestamp: Date.now(),
-      });
-
-      // Keep history manageable (max 10 entries)
-      if (this.translationHistory.length > 10) {
-        this.translationHistory = this.translationHistory.slice(-10);
-      }
-
-      return translatedText;
+      // Return the structured result with blocks
+      return {
+        success: true,
+        blocks: result.blocks,
+        usage: result.usage,
+        model: result.model,
+      };
     } catch (error) {
       console.error('Translation API call failed:', error);
 
@@ -1190,18 +1060,18 @@ class LineLocalizationMachine {
       const translatedText = translatedTexts[i] || item.originalText;
 
       await this.animateLineTransition(item, translatedText);
-      await this.delay(10); // Faster stagger for quicker flow
+      // Minimal stagger - animation should be fast, LLM is the bottleneck
     }
   }
 
   async animateLineTransition(item, translatedText) {
     const element = item.element;
 
-    // Phase 1: Subtle fade out
+    // Phase 1: Quick fade out
     element.classList.remove('llm-preparing');
     element.classList.add('llm-fading-out');
 
-    await this.delay(150);
+    await this.delay(50); // Reduced from 150ms
 
     // Phase 2: Store original text and update with translation
     element.setAttribute('data-llm-original', item.originalText);
@@ -1247,11 +1117,11 @@ class LineLocalizationMachine {
       element.textContent = translatedText;
     }
 
-    // Phase 3: Fade in with translation animation
+    // Phase 3: Quick fade in with translation animation
     element.classList.remove('llm-fading-out');
     element.classList.add('llm-translated');
 
-    await this.delay(200);
+    await this.delay(60); // Reduced from 200ms
 
     // Phase 4: Settle
     element.classList.add('llm-settled');
@@ -1576,37 +1446,36 @@ class LineLocalizationMachine {
 
     const css = `
       .llm-preparing {
-        transition-duration: ${0.2 * multiplier}s !important;
-        animation-duration: ${1.0 * multiplier}s !important;
+        animation-duration: ${3.0 * multiplier}s !important;
       }
       .llm-fading-out {
-        animation-duration: ${0.15 * multiplier}s !important;
+        animation-duration: ${0.06 * multiplier}s !important;
       }
       .llm-translated {
-        animation-duration: ${0.2 * multiplier}s !important;
+        animation-duration: ${0.08 * multiplier}s !important;
       }
       .llm-settled {
-        transition-duration: ${0.2 * multiplier}s !important;
+        transition-duration: ${0.1 * multiplier}s !important;
       }
       .llm-error {
-        animation-duration: ${0.5 * multiplier}s !important;
+        animation-duration: ${0.3 * multiplier}s !important;
       }
       .llm-block-loading::after {
         animation-duration: ${1.0 * multiplier}s !important;
       }
       .llm-showing-original {
-        transition-duration: ${0.2 * multiplier}s !important;
+        transition-duration: ${0.1 * multiplier}s !important;
       }
       #llm-progress-bar {
-        animation-duration: ${0.3 * multiplier}s !important;
+        animation-duration: ${0.2 * multiplier}s !important;
       }
       .llm-progress-fill {
-        transition-duration: ${0.3 * multiplier}s !important;
+        transition-duration: ${0.2 * multiplier}s !important;
       }
       @media (prefers-reduced-motion: reduce) {
         .llm-preparing, .llm-fading-out, .llm-translated, .llm-settled {
           animation: none !important;
-          transition: opacity ${0.2 * multiplier}s ease !important;
+          transition: opacity ${0.1 * multiplier}s ease !important;
         }
       }
     `;

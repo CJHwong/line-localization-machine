@@ -179,14 +179,13 @@
             <div class="form-group">
               <label for="blocksPerRequest">Blocks Per API Request</label>
               <select id="blocksPerRequest">
-                <option value="3">
-                  3 blocks per request (More requests, better error recovery)
-                </option>
-                <option value="5">5 blocks per request (Balanced)</option>
-                <option value="8">8 blocks per request (Fewer requests, more efficient)</option>
+                <option value="8">8 blocks per request (Conservative)</option>
+                <option value="15">15 blocks per request (Recommended)</option>
+                <option value="25">25 blocks per request (Maximum context)</option>
               </select>
-              <small>How many blocks to combine into a single API call</small>
+              <small>More blocks = better context for translation, but larger API calls</small>
             </div>
+
           </section>
         </div>
       </main>

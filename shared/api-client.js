@@ -193,151 +193,74 @@ export default class APIClient {
   }
 
   /**
-   * Make a translation request
+   * Make a JSON-based translation request
    * @param {Object} config - API configuration
-   * @param {string} text - Text to translate
-   * @param {string} targetLanguage - Target language for translation
+   * @param {Object} translationData - Structured translation data
+   * @param {string} translationData.targetLanguage - Target language for translation
+   * @param {Array} translationData.blocks - Array of {id, items} objects
    * @param {Object} options - Additional options
-   * @param {Array} options.translationHistory - Previous translations for context
-   * @returns {Promise<Object>} Translation result
+   * @returns {Promise<Object>} Translation result with parsed blocks
    */
-  static async translate(config, text, targetLanguage, options = {}) {
-    const { translationHistory = [] } = options;
-    // Detect if this is a batch translation with separators
-    const hasBatchSeparators =
-      text.includes('===BLOCK_SEPARATOR===') || text.includes('||ITEM_SEPARATOR||');
-
-    let systemPrompt;
-    if (hasBatchSeparators) {
-      // Enhanced prompt for batch translation with separators
-      systemPrompt = `# Role and Context
-You are a professional website translator specializing in natural, culturally-appropriate localization. You're translating webpage content for real users browsing in their native language.
-
-# Core Translation Principles
-1. **Natural fluency**: Translate for meaning and readability, not word-for-word
-2. **Cultural adaptation**: Use terminology and phrasing that feels native to ${targetLanguage} speakers
-3. **Context preservation**: Maintain the original's tone, style, and intent
-4. **User experience**: Ensure translations read as if originally written in ${targetLanguage}
-
-# Technical Requirements (CRITICAL - Must Follow Exactly)
-
-## Separators - NEVER modify these:
-- \`===BLOCK_SEPARATOR===\` - Keep exactly as-is with same newlines
-- \`||ITEM_SEPARATOR||\` - Keep exactly as-is with same newlines
-- Count separators in input, ensure same count in output
-
-## Link Placeholders - Translate content but preserve markers:
-- Format: \`[LINK_1]clickable text[/LINK_1]\`
-- PRESERVE: \`[LINK_1]\` and \`[/LINK_1]\` markers exactly
-- TRANSLATE: The text between markers
-- Example: \`[LINK_1]Click here[/LINK_1]\` → \`[LINK_1]點擊這裡[/LINK_1]\`
-
-## Content Types - Handle appropriately:
-- **Navigation/UI**: Use standard ${targetLanguage} interface terms
-- **Articles/Blog posts**: Natural, flowing prose
-- **Technical content**: Keep technical terms, add translations in parentheses if needed
-- **Marketing content**: Adapt messaging for cultural appropriateness
-- **Numbers/Dates/URLs**: Preserve exactly (don't localize formats)
-
-# Quality Guidelines
-- **Consistency**: Related blocks should use consistent terminology
-- **Readability**: Prioritize clear, natural language over literal accuracy  
-- **Completeness**: Translate ALL content, don't skip difficult phrases
-- **Formatting**: Preserve HTML tags, punctuation, spacing exactly${
-        translationHistory.length > 0
-          ? `
-
-# Context from Previous Translations
-Use these for consistency:
-${translationHistory
-  .slice(-3)
-  .map(h => `"${h.original}" → "${h.translated}"`)
-  .join('\n')}`
-          : ''
-      }
-
-# Output Rules
-- Return ONLY the translated text
-- NO explanations, comments, or meta-text
-- Maintain exact same structure as input
-- All separators and placeholders must be identical to input`;
-    } else {
-      // Standard prompt for simple translation
-      systemPrompt = `# Role and Context
-You are a professional website translator specializing in natural, culturally-appropriate localization. You're translating webpage content for real users browsing in their native language.
-
-# Core Translation Principles
-1. **Natural fluency**: Translate for meaning and readability, not word-for-word
-2. **Cultural adaptation**: Use terminology and phrasing that feels native to ${targetLanguage} speakers
-3. **Context preservation**: Maintain the original's tone, style, and intent
-4. **User experience**: Ensure translations read as if originally written in ${targetLanguage}
-
-# Content Guidelines
-- **Navigation/UI elements**: Use standard ${targetLanguage} interface terminology
-- **Articles/Blog posts**: Create natural, flowing prose that engages readers
-- **Technical content**: Preserve technical terms, add clarification in parentheses if helpful
-- **Marketing content**: Adapt messaging for cultural appropriateness and effectiveness
-- **Proper nouns**: Keep brand names, preserve or adapt person/place names as appropriate
-- **Numbers/Dates/Measurements**: Preserve exactly (don't change formats)
-- **HTML/Formatting**: Maintain all tags, spacing, and structure precisely
-
-# Quality Standards
-- **Readability**: Prioritize clear, natural language over literal word-for-word translation
-- **Completeness**: Translate ALL content, don't skip challenging phrases
-- **Tone matching**: Professional content stays professional, casual stays casual${
-        translationHistory.length > 0
-          ? `
-
-# Context from Previous Translations
-Use these for consistent terminology:
-${translationHistory
-  .slice(-3)
-  .map(h => `"${h.original}" → "${h.translated}"`)
-  .join('\n')}`
-          : ''
-      }
-
-# Output Rules
-- Return ONLY the translated text
-- NO explanations, comments, or meta-text
-- Preserve exact formatting and structure`;
+  static async translate(config, translationData, options = {}) {
+    // Validate translationData structure
+    if (!translationData || !translationData.blocks || !Array.isArray(translationData.blocks)) {
+      return {
+        success: false,
+        error: 'Invalid translation data: missing blocks array',
+        errorType: 'client_error',
+        isRetryable: false,
+      };
     }
+
+    const { targetLanguage, blocks } = translationData;
+
+    // Build system prompt optimized for JSON output
+    const systemPrompt = `You are a professional translator. Translate the JSON input to ${targetLanguage}.
+
+OUTPUT FORMAT: Valid JSON only. No markdown, no explanation, no code blocks.
+
+CRITICAL RULES:
+1. Output ONLY valid JSON - no \`\`\` markers, no extra text
+2. Keep exact structure: same block count, same item count per block
+3. Keep [LINK_N]...[/LINK_N] markers exactly, translate only text inside
+4. Keep HTML tags, numbers, URLs, brand names unchanged
+5. Translate naturally for ${targetLanguage} speakers
+
+STRUCTURE:
+Input:  {"blocks":[{"id":0,"items":["text1","text2"]},{"id":1,"items":["text3"]}]}
+Output: {"blocks":[{"id":0,"items":["譯文1","譯文2"]},{"id":1,"items":["譯文3"]}]}
+
+EXAMPLE:
+Input:  {"blocks":[{"id":0,"items":["Hello world","Click [LINK_1]here[/LINK_1] to continue"]}]}
+Output: {"blocks":[{"id":0,"items":["你好世界","點擊 [LINK_1]這裡[/LINK_1] 繼續"]}]}
+
+Translate naturally - not word-for-word. Match the tone of the original.`;
 
     const messages = [
       {
         role: 'system',
         content: systemPrompt,
       },
+      {
+        role: 'user',
+        content: JSON.stringify({ blocks }),
+      },
     ];
-
-    // Add recent translation history as conversation context (like original implementation)
-    if (translationHistory.length > 0) {
-      const recentHistory = translationHistory.slice(-2); // Last 2 translations for context
-      for (const historyItem of recentHistory) {
-        messages.push(
-          { role: 'user', content: historyItem.original },
-          { role: 'assistant', content: historyItem.translated }
-        );
-      }
-    }
-
-    // Add current text to translate
-    messages.push({
-      role: 'user',
-      content: text,
-    });
 
     try {
       const result = await this.chatCompletion(config, messages, {
         temperature: options.temperature !== undefined ? options.temperature : 0.3,
-        maxTokens: options.maxTokens || 2000,
-        timeout: options.timeout || 30000,
+        maxTokens: options.maxTokens || 4000,
+        timeout: options.timeout || 60000,
         reasoningEffort: options.reasoningEffort || 'off',
       });
 
+      // Parse JSON response
+      const parsedResponse = this.parseJSONResponse(result.content, blocks.length);
+
       return {
         success: true,
-        translatedText: result.content,
+        blocks: parsedResponse.blocks,
         usage: result.usage,
         model: result.model,
       };
@@ -352,6 +275,57 @@ ${translationHistory
         retryAfter: error.retryAfter,
       };
     }
+  }
+
+  /**
+   * Parse JSON response from LLM, handling common formatting issues
+   * @param {string} content - Raw response content
+   * @param {number} expectedBlockCount - Expected number of blocks
+   * @returns {Object} Parsed response with blocks array
+   */
+  static parseJSONResponse(content, expectedBlockCount) {
+    const jsonStr = content.trim();
+
+    // Try direct parse first
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.blocks && Array.isArray(parsed.blocks)) {
+        return parsed;
+      }
+    } catch (e) {
+      // Continue to fallback methods
+    }
+
+    // Try to extract JSON from markdown code block
+    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      try {
+        const parsed = JSON.parse(codeBlockMatch[1].trim());
+        if (parsed.blocks && Array.isArray(parsed.blocks)) {
+          return parsed;
+        }
+      } catch (e) {
+        // Continue to next fallback
+      }
+    }
+
+    // Try to find JSON object in the response
+    const jsonMatch = jsonStr.match(/\{[\s\S]*"blocks"[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.blocks && Array.isArray(parsed.blocks)) {
+          return parsed;
+        }
+      } catch (e) {
+        // Continue to error
+      }
+    }
+
+    // If all parsing fails, throw error
+    throw new Error(
+      `Failed to parse JSON response. Expected ${expectedBlockCount} blocks. Raw response: ${jsonStr.substring(0, 200)}...`
+    );
   }
 
   /**
