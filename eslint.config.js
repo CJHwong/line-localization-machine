@@ -120,6 +120,11 @@ module.exports = [
         global: 'readonly',
         Buffer: 'readonly',
 
+        // Standard globals available in Node.js
+        URL: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+
         // Browser globals for testing
         window: 'readonly',
         document: 'readonly',
