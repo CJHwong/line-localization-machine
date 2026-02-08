@@ -1,88 +1,130 @@
-/* Line Localization Machine - Animation Styles */
+/* Line Localization Machine — Animation Styles
+   Design: typographic margin markers — a precision instrument annotating a manuscript.
+   Each phase uses a left-border accent + subtle background shift.
+   Colors: warm amber (#d97706) for in-progress, dark ink (#2d2a25) for completed. */
 
-/* Preparing phase - gentle pulse indicating waiting for translation */
+/* ─────────────────────────────────────────────
+   Phase 1: PREPARING — queued, waiting for translation
+   A slow scanning line sweeps left-to-right across the block,
+   like a reading head traversing the text.
+   ───────────────────────────────────────────── */
 .llm-preparing {
   position: relative;
-  background-color: rgba(99, 102, 241, 0.06);
-  border-radius: 3px;
-  animation: llm-pulse 3s ease-in-out infinite;
+  border-left: 2px solid rgba(217, 119, 6, 0.4);
+  padding-left: 6px;
+  overflow: hidden;
 }
 
-@keyframes llm-pulse {
-  0%,
+.llm-preparing::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(217, 119, 6, 0.06) 0%, rgba(217, 119, 6, 0) 60%);
+  animation: llm-scan 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  pointer-events: none;
+}
+
+@keyframes llm-scan {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
   100% {
-    background-color: rgba(99, 102, 241, 0.04);
-  }
-  50% {
-    background-color: rgba(99, 102, 241, 0.12);
+    transform: translateX(100%);
+    opacity: 0;
   }
 }
 
-/* Fade out phase - content disappearing */
+/* ─────────────────────────────────────────────
+   Phase 2: FADING OUT — original text dissolving
+   Quick, precise. No scale transform — just opacity
+   drop with a subtle vertical clip.
+   ───────────────────────────────────────────── */
 .llm-fading-out {
   position: relative;
   animation: llm-fade-out 0.06s cubic-bezier(0.4, 0, 1, 1) forwards;
   overflow: hidden;
+  border-left: 2px solid rgba(217, 119, 6, 0.2);
+  padding-left: 6px;
 }
 
 @keyframes llm-fade-out {
   0% {
     opacity: 1;
-    transform: scale(1);
   }
   100% {
-    opacity: 0.4;
-    transform: scale(0.98);
+    opacity: 0.15;
   }
 }
 
-/* Translated phase - content appearing with glow */
+/* ─────────────────────────────────────────────
+   Phase 3: TRANSLATED — new content reveal
+   The left border solidifies to dark ink. Background
+   briefly warms then fades. A clean mechanical reveal.
+   ───────────────────────────────────────────── */
 .llm-translated {
   position: relative;
-  animation: llm-translate-in 0.08s cubic-bezier(0, 0, 0.2, 1) forwards;
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(59, 130, 246, 0.1));
-  border-radius: 4px;
-  padding: 2px 4px;
+  animation: llm-reveal 0.18s cubic-bezier(0, 0, 0.2, 1) forwards;
+  border-left: 2px solid #2d2a25;
+  padding-left: 6px;
   margin: 1px 0;
 }
 
-@keyframes llm-translate-in {
+@keyframes llm-reveal {
   0% {
-    opacity: 0.4;
-    transform: scale(0.98);
+    opacity: 0.15;
+    background-color: rgba(217, 119, 6, 0.06);
+  }
+  50% {
+    opacity: 1;
+    background-color: rgba(217, 119, 6, 0.04);
   }
   100% {
     opacity: 1;
-    transform: scale(1);
-    box-shadow: 0 0 8px rgba(34, 197, 94, 0.15);
+    background-color: transparent;
   }
 }
 
-/* Settled phase - final state with subtle highlight */
+/* ─────────────────────────────────────────────
+   Phase 4: SETTLED — final resting state
+   Minimal. A thin warm-gray left border as permanent
+   margin marker. Almost invisible until you hover.
+   ───────────────────────────────────────────── */
 .llm-settled {
   position: relative;
-  transition: all 0.1s ease;
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.05), rgba(59, 130, 246, 0.05));
-  padding: 2px 4px;
+  border-left: 2px solid #e0ded7;
+  padding-left: 6px;
   margin: 1px 0;
-  border-radius: 4px;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
 }
 
-/* Hover effects for translated content */
 .llm-settled:hover {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(59, 130, 246, 0.1));
-  transform: translateX(2px);
-  box-shadow: 0 2px 10px rgba(34, 197, 94, 0.15);
+  border-left-color: #d97706;
+  background-color: rgba(217, 119, 6, 0.03);
 }
 
-/* Error state animation */
+/* ─────────────────────────────────────────────
+   ERROR — translation failed for this block
+   Sharp red left border, single tight shake.
+   ───────────────────────────────────────────── */
 .llm-error {
   position: relative;
-  animation: llm-error-shake 0.3s ease-in-out;
-  background: rgba(239, 68, 68, 0.1);
-  padding: 2px 4px;
+  animation: llm-error-shake 0.25s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+  border-left: 2px solid #dc2626;
+  padding-left: 6px;
   margin: 1px 0;
-  border-radius: 4px;
+  background-color: rgba(220, 38, 38, 0.03);
 }
 
 @keyframes llm-error-shake {
@@ -90,22 +132,24 @@
   100% {
     transform: translateX(0);
   }
-  10%,
-  30%,
-  50%,
-  70%,
-  90% {
-    transform: translateX(-2px);
+  20% {
+    transform: translateX(-3px);
   }
-  20%,
-  40%,
-  60%,
-  80% {
+  40% {
     transform: translateX(2px);
+  }
+  60% {
+    transform: translateX(-1px);
+  }
+  80% {
+    transform: translateX(1px);
   }
 }
 
-/* Loading spinner for blocks */
+/* ─────────────────────────────────────────────
+   BLOCK LOADING — spinner on actively-translating blocks
+   Small amber dot spinner, positioned in the left margin.
+   ───────────────────────────────────────────── */
 .llm-block-loading {
   position: relative;
 }
@@ -113,15 +157,15 @@
 .llm-block-loading::after {
   content: '';
   position: absolute;
-  right: -20px;
+  left: -12px;
   top: 50%;
   transform: translateY(-50%);
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgba(99, 102, 241, 0.3);
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid rgba(217, 119, 6, 0.25);
   border-radius: 50%;
-  border-top-color: #6366f1;
-  animation: llm-spin 1s linear infinite;
+  border-top-color: #d97706;
+  animation: llm-spin 0.8s linear infinite;
 }
 
 @keyframes llm-spin {
@@ -130,55 +174,107 @@
   }
 }
 
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .llm-preparing,
-  .llm-translated,
-  .llm-settled {
-    padding: 1px 2px;
-    margin: 0.5px 0;
-  }
-}
-
-/* Dark mode compatibility */
-@media (prefers-color-scheme: dark) {
-  .llm-preparing {
-    background-color: rgba(139, 92, 246, 0.08);
-  }
-
-  @keyframes llm-pulse {
-    0%,
-    100% {
-      background-color: rgba(139, 92, 246, 0.06);
-    }
-    50% {
-      background-color: rgba(139, 92, 246, 0.15);
-    }
-  }
-
-  .llm-translated {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(139, 92, 246, 0.15));
-  }
-
-  .llm-settled {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(139, 92, 246, 0.08));
-  }
-}
-
-/* Show original state - yellow background for original text display */
+/* ─────────────────────────────────────────────
+   SHOWING ORIGINAL — toggled back to original text
+   Amber left border replaces the settled gray.
+   ───────────────────────────────────────────── */
 .llm-showing-original {
-  background: rgba(255, 193, 7, 0.15) !important;
-  border-radius: 3px;
-  transition: background-color 0.2s ease;
+  border-left: 2px solid #d97706 !important;
+  padding-left: 6px !important;
+  background-color: rgba(217, 119, 6, 0.03) !important;
+  transition: all 0.15s ease;
 }
 
-/* Accessibility: Reduce motion for users who prefer it */
-@media (prefers-reduced-motion: reduce) {
+/* ─────────────────────────────────────────────
+   Responsive — tighter spacing on mobile
+   ───────────────────────────────────────────── */
+@media (max-width: 768px) {
   .llm-preparing,
   .llm-fading-out,
   .llm-translated,
+  .llm-settled,
+  .llm-error,
+  .llm-showing-original {
+    padding-left: 4px;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   Dark mode — increase opacity for visibility
+   ───────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  .llm-preparing {
+    border-left-color: rgba(251, 191, 36, 0.5);
+  }
+
+  .llm-preparing::after {
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.08) 0%, rgba(251, 191, 36, 0) 60%);
+  }
+
+  .llm-translated {
+    border-left-color: #e2e8f0;
+  }
+
+  @keyframes llm-reveal {
+    0% {
+      opacity: 0.15;
+      background-color: rgba(251, 191, 36, 0.08);
+    }
+    50% {
+      opacity: 1;
+      background-color: rgba(251, 191, 36, 0.04);
+    }
+    100% {
+      opacity: 1;
+      background-color: transparent;
+    }
+  }
+
   .llm-settled {
+    border-left-color: rgba(226, 232, 240, 0.15);
+  }
+
+  .llm-settled:hover {
+    border-left-color: #fbbf24;
+    background-color: rgba(251, 191, 36, 0.05);
+  }
+
+  .llm-error {
+    border-left-color: #f87171;
+    background-color: rgba(248, 113, 113, 0.06);
+  }
+
+  .llm-showing-original {
+    border-left-color: #fbbf24 !important;
+    background-color: rgba(251, 191, 36, 0.05) !important;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   Accessibility — reduce motion
+   ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .llm-preparing::after {
     animation: none !important;
-    transition: opacity 0.2s ease !important;
+    transform: none;
+    opacity: 0.5;
+  }
+
+  .llm-fading-out {
+    animation: none !important;
+    opacity: 0.15;
+  }
+
+  .llm-translated {
+    animation: none !important;
+    opacity: 1;
+  }
+
+  .llm-error {
+    animation: none !important;
+  }
+
+  .llm-settled {
+    transition: none !important;
   }
 }

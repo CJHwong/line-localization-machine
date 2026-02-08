@@ -886,9 +886,10 @@ class LineLocalizationMachine {
     const progressBar = document.createElement('div');
     progressBar.id = 'llm-progress-bar';
     progressBar.innerHTML = `
-      <div class="llm-progress-container">
-        <div class="llm-progress-text">🌐 Translating content...</div>
-        <div class="llm-progress-bar">
+      <div class="llm-progress-inner">
+        <div class="llm-progress-label">Translating</div>
+        <div class="llm-progress-text">Analyzing content...</div>
+        <div class="llm-progress-track">
           <div class="llm-progress-fill" style="width: 0%"></div>
         </div>
       </div>
@@ -896,46 +897,59 @@ class LineLocalizationMachine {
 
     // Add styles
     const style = document.createElement('style');
+    style.setAttribute('data-llm-progress', '');
     style.textContent = `
       #llm-progress-bar {
         position: fixed;
-        top: 20px;
-        right: 20px;
+        top: 16px;
+        right: 16px;
         z-index: 10000;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 16px;
-        border-radius: 8px;
-        color: white;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        animation: slideIn 0.3s ease;
+        background: #fffffe;
+        border: 1px solid #e0ded7;
+        padding: 14px 16px;
+        border-radius: 4px;
+        color: #2d2a25;
+        font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+        animation: llmSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        min-width: 220px;
       }
-      
-      @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
+
+      @keyframes llmSlideIn {
+        from { transform: translateY(-8px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
       }
-      
+
+      .llm-progress-label {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #d97706;
+        margin-bottom: 4px;
+      }
+
       .llm-progress-text {
-        font-size: 12px;
-        margin-bottom: 8px;
-        font-weight: 500;
-        color: rgba(255, 255, 255, 0.7);
+        font-size: 11px;
+        font-weight: 400;
+        color: #8a857a;
+        margin-bottom: 10px;
+        line-height: 1.3;
       }
-      
-      .llm-progress-bar {
-        width: 200px;
-        height: 4px;
-        background: rgba(255, 255, 255, 0.3);
-        border-radius: 2px;
+
+      .llm-progress-track {
+        width: 100%;
+        height: 3px;
+        background: #efeee9;
+        border-radius: 1px;
         overflow: hidden;
       }
-      
+
       .llm-progress-fill {
         height: 100%;
-        background: linear-gradient(90deg, #22c55e, #3b82f6);
+        background: #2d2a25;
         transition: width 0.3s ease;
-        border-radius: 2px;
+        border-radius: 1px;
       }
     `;
 
@@ -952,7 +966,7 @@ class LineLocalizationMachine {
 
       fill.style.width = `${percentage}%`;
       const blocksPerRequest = this.translationSettings?.blocksPerRequest || 5;
-      text.textContent = `🌐 Translating... ${current}/${total} blocks (${blocksPerRequest}/batch, pipeline)`;
+      text.textContent = `${current}/${total} blocks \u00b7 ${blocksPerRequest}/batch \u00b7 ${percentage}%`;
     }
   }
 
@@ -963,7 +977,7 @@ class LineLocalizationMachine {
 
       if (progressBar) {
         const animationDuration = this.getAdjustedTiming(300);
-        progressBar.style.animation = `slideIn ${animationDuration}ms ease reverse`;
+        progressBar.style.animation = `llmSlideIn ${animationDuration}ms ease reverse`;
         setTimeout(() => progressBar.remove(), animationDuration);
       }
 
@@ -1310,56 +1324,64 @@ class LineLocalizationMachine {
     style.textContent = `
       #llm-original-toggle {
         position: fixed;
-        top: 20px;
-        right: 20px;
+        top: 16px;
+        right: 16px;
         z-index: 9999;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        animation: slideIn 0.3s ease;
+        font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
+        animation: llmSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
-      
+
+      @keyframes llmSlideIn {
+        from { transform: translateY(-8px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+      }
+
       .llm-toggle-container {
-        backdrop-filter: blur(12px);
-        background: rgba(255, 255, 255, 0.9);
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: #fffffe;
+        border: 1px solid #e0ded7;
+        border-radius: 4px;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
       }
-      
+
       .llm-toggle-btn {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 12px 16px;
+        padding: 10px 14px;
         background: none;
         border: none;
-        color: #333;
-        font-size: 14px;
-        font-weight: 500;
+        color: #2d2a25;
+        font-family: inherit;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
         cursor: pointer;
         transition: all 0.2s ease;
-        border-radius: 12px;
+        border-radius: 4px;
       }
-      
+
       .llm-toggle-btn:hover {
-        background: rgba(102, 126, 234, 0.1);
-        color: #667eea;
+        background: #f7f6f3;
+        color: #d97706;
       }
-      
+
       .llm-toggle-btn.active {
-        background: #667eea;
-        color: white;
+        background: #2d2a25;
+        color: #faf9f7;
       }
-      
+
+      .llm-toggle-btn.active:hover {
+        background: #1a1816;
+      }
+
       .toggle-icon {
         transition: transform 0.2s ease;
       }
-      
+
       .llm-toggle-btn.active .toggle-icon {
         transform: rotate(180deg);
       }
-      
-      /* Global toggle button styles only - animations handled by animations.css */
-      /* Note: .llm-showing-original styles are defined in animations.css */
     `;
 
     document.head.appendChild(style);
@@ -1449,37 +1471,39 @@ class LineLocalizationMachine {
     if (multiplier === 1.0) return;
 
     const css = `
-      .llm-preparing {
-        animation-duration: ${3.0 * multiplier}s !important;
+      .llm-preparing::after {
+        animation-duration: ${2.4 * multiplier}s !important;
       }
       .llm-fading-out {
         animation-duration: ${0.06 * multiplier}s !important;
       }
       .llm-translated {
-        animation-duration: ${0.08 * multiplier}s !important;
+        animation-duration: ${0.18 * multiplier}s !important;
       }
       .llm-settled {
-        transition-duration: ${0.1 * multiplier}s !important;
-      }
-      .llm-error {
-        animation-duration: ${0.3 * multiplier}s !important;
-      }
-      .llm-block-loading::after {
-        animation-duration: ${1.0 * multiplier}s !important;
-      }
-      .llm-showing-original {
-        transition-duration: ${0.1 * multiplier}s !important;
-      }
-      #llm-progress-bar {
-        animation-duration: ${0.2 * multiplier}s !important;
-      }
-      .llm-progress-fill {
         transition-duration: ${0.2 * multiplier}s !important;
       }
+      .llm-error {
+        animation-duration: ${0.25 * multiplier}s !important;
+      }
+      .llm-block-loading::after {
+        animation-duration: ${0.8 * multiplier}s !important;
+      }
+      .llm-showing-original {
+        transition-duration: ${0.15 * multiplier}s !important;
+      }
+      #llm-progress-bar {
+        animation-duration: ${0.3 * multiplier}s !important;
+      }
+      .llm-progress-fill {
+        transition-duration: ${0.3 * multiplier}s !important;
+      }
       @media (prefers-reduced-motion: reduce) {
-        .llm-preparing, .llm-fading-out, .llm-translated, .llm-settled {
+        .llm-preparing::after, .llm-fading-out, .llm-translated, .llm-error {
           animation: none !important;
-          transition: opacity ${0.1 * multiplier}s ease !important;
+        }
+        .llm-settled {
+          transition: none !important;
         }
       }
     `;
