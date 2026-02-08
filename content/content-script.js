@@ -17,6 +17,186 @@ class LineLocalizationMachine {
     this.init();
   }
 
+  // ─── Pure helper methods for inline element preservation ───────────────────
+
+  /**
+   * Strip all [T:N], [/T:N], and [O:N] markers from text.
+   * Used as a safety net at every output boundary to ensure markers never reach the DOM.
+   */
+  stripMarkers(text) {
+    if (typeof text !== 'string') return String(text ?? '');
+    return text
+      .replace(/\[T:\d+\]/g, '')
+      .replace(/\[\/T:\d+\]/g, '')
+      .replace(/\[O:\d+\]/g, '');
+  }
+
+  /**
+   * Sanitize HTML string: strip dangerous elements and event-handler attributes.
+   * Uses a temp <div> to parse, then removes threats before returning innerHTML.
+   */
+  sanitizeHTML(html) {
+    if (!html) return '';
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+
+    // Remove dangerous elements
+    const dangerousTags = ['script', 'iframe', 'object', 'embed', 'form'];
+    for (const tag of dangerousTags) {
+      const els = temp.querySelectorAll(tag);
+      for (const el of els) el.remove();
+    }
+
+    // Remove event-handler attributes and javascript: hrefs from all elements
+    const allEls = temp.querySelectorAll('*');
+    for (const el of allEls) {
+      const attrsToRemove = [];
+      for (const attr of el.attributes) {
+        if (attr.name.startsWith('on')) {
+          attrsToRemove.push(attr.name);
+        }
+      }
+      for (const name of attrsToRemove) {
+        el.removeAttribute(name);
+      }
+      // Strip javascript: hrefs
+      const href = el.getAttribute('href');
+      if (href && href.trim().toLowerCase().startsWith('javascript:')) {
+        el.removeAttribute('href');
+      }
+    }
+
+    return temp.innerHTML;
+  }
+
+  /**
+   * Serialize an element's children into text with placeholder markers.
+   *
+   * - Text nodes → pass through as-is
+   * - Translatable inline elements (STRONG, EM, B, I, MARK, SPAN, A) →
+   *   [T:N]textContent[/T:N], storing tag name + attributes in map
+   * - Opaque inline elements (CODE, KBD, SAMP, ABBR, SUB, SUP, VAR, TIME) →
+   *   [O:N], storing full outerHTML in map
+   * - Self-closing (BR, IMG, HR, WBR) → [O:N], storing outerHTML
+   * - Unknown elements → treated as opaque
+   *
+   * Returns { text: string, placeholderMap: object | null }
+   */
+  serializeForTranslation(element) {
+    const TRANSLATABLE_TAGS = new Set(['STRONG', 'EM', 'B', 'I', 'MARK', 'SPAN', 'A']);
+    const OPAQUE_TAGS = new Set(['CODE', 'KBD', 'SAMP', 'ABBR', 'SUB', 'SUP', 'VAR', 'TIME']);
+    const SELF_CLOSING_TAGS = new Set(['BR', 'IMG', 'HR', 'WBR']);
+
+    const map = {};
+    let counter = 0;
+    let hasAnyPlaceholder = false;
+
+    const walk = node => {
+      let result = '';
+      for (const child of node.childNodes) {
+        if (child.nodeType === 3 /* TEXT_NODE */) {
+          result += child.textContent;
+        } else if (child.nodeType === 1 /* ELEMENT_NODE */) {
+          const tag = child.tagName;
+
+          if (SELF_CLOSING_TAGS.has(tag)) {
+            counter++;
+            hasAnyPlaceholder = true;
+            map[String(counter)] = { type: 'opaque', outerHTML: child.outerHTML };
+            result += `[O:${counter}]`;
+          } else if (OPAQUE_TAGS.has(tag)) {
+            counter++;
+            hasAnyPlaceholder = true;
+            map[String(counter)] = { type: 'opaque', outerHTML: child.outerHTML };
+            result += `[O:${counter}]`;
+          } else if (TRANSLATABLE_TAGS.has(tag)) {
+            counter++;
+            hasAnyPlaceholder = true;
+            // Collect attributes as a string
+            const attrs = Array.from(child.attributes)
+              .map(a => `${a.name}="${a.value}"`)
+              .join(' ');
+            map[String(counter)] = { type: 'translatable', tag, attrs };
+            // Recurse into children for nested translatable elements
+            const innerText = walk(child);
+            result += `[T:${counter}]${innerText}[/T:${counter}]`;
+          } else {
+            // Unknown element → treat as opaque
+            counter++;
+            hasAnyPlaceholder = true;
+            map[String(counter)] = { type: 'opaque', outerHTML: child.outerHTML };
+            result += `[O:${counter}]`;
+          }
+        }
+      }
+      return result;
+    };
+
+    const text = walk(element);
+    return {
+      text,
+      placeholderMap: hasAnyPlaceholder ? map : null,
+    };
+  }
+
+  /**
+   * Deserialize translated text by restoring placeholders to HTML.
+   *
+   * Two passes:
+   * 1. Replace [O:N] → stored outerHTML
+   * 2. Replace [T:N]...content...[/T:N] → <tag attrs>content</tag> (inside-out)
+   * 3. Cleanup: strip any orphaned markers
+   */
+  deserializeFromTranslation(text, map) {
+    // Coerce to string to prevent TypeError on non-string LLM output
+    let result = typeof text === 'string' ? text : String(text ?? '');
+
+    // If we have a map, restore markers to HTML
+    if (map) {
+      // Pass 1: Replace opaque markers [O:N]
+      result = result.replace(/\[O:(\d+)\]/g, (match, id) => {
+        const entry = map[id];
+        if (entry && entry.type === 'opaque') {
+          return entry.outerHTML;
+        }
+        return match; // will be cleaned up below
+      });
+
+      // Pass 2: Replace translatable markers [T:N]...[/T:N] — inside-out
+      // Loop until no more replacements, handling nesting
+      let changed = true;
+      let iterations = 0;
+      const MAX_ITERATIONS = 20;
+      while (changed && iterations < MAX_ITERATIONS) {
+        changed = false;
+        iterations++;
+        result = result.replace(
+          /\[T:(\d+)\]((?:(?!\[T:\d+\])[\s\S])*?)\[\/T:\1\]/g,
+          (match, id, content) => {
+            const entry = map[id];
+            if (entry && entry.type === 'translatable') {
+              changed = true;
+              const tagLower = entry.tag.toLowerCase();
+              const attrStr = entry.attrs ? ` ${entry.attrs}` : '';
+              return `<${tagLower}${attrStr}>${content}</${tagLower}>`;
+            }
+            return match;
+          }
+        );
+      }
+
+      // Pass 3: Strip orphaned paired markers not in our map (keep content)
+      result = result.replace(/\[T:(\d+)\]([\s\S]*?)\[\/T:\1\]/g, (match, id, content) => {
+        if (!map[id]) return content;
+        return match;
+      });
+    }
+
+    // Always strip any remaining markers — even without a map, the LLM may
+    // cross-contaminate markers from other items in the same batch
+    return this.stripMarkers(result);
+  }
+
   async init() {
     // Content script self-cleanup: Clear any stale translation state for this tab
     // This handles Firefox page refresh where tab update events don't fire reliably
@@ -196,8 +376,7 @@ class LineLocalizationMachine {
   }
 
   findMainContent() {
-    // Priority order for finding main content
-    const selectors = [
+    const CANDIDATE_SELECTORS = [
       'main',
       '[role="main"]',
       'article',
@@ -206,135 +385,203 @@ class LineLocalizationMachine {
       '.main-content',
       '.post-content',
       '.entry-content',
+      '.article-content',
+      '.body.markup', // Substack
+      '.meteredContent', // Medium
+      '.md', // Reddit markdown
       '.container',
       '.wrapper',
-      'body',
     ];
+    const NAV_TAGS = new Set(['NAV', 'HEADER', 'FOOTER', 'ASIDE']);
+    const SEMANTIC_TAGS = new Set(['MAIN', 'ARTICLE']);
+    const MIN_SCORE = 50;
 
-    for (const selector of selectors) {
-      const element = document.querySelector(selector);
-      if (element && this.hasSignificantText(element)) {
-        return element;
+    let bestCandidate = null;
+    let bestScore = -1;
+
+    for (const selector of CANDIDATE_SELECTORS) {
+      const elements = document.querySelectorAll(selector);
+      for (const el of elements) {
+        // Skip navigation containers
+        if (NAV_TAGS.has(el.tagName)) continue;
+
+        const textLength = (el.textContent || '').trim().length;
+        if (textLength < 50) continue;
+
+        let score = 0;
+
+        // Text length contribution (1 point per 100 chars, capped at 50)
+        score += Math.min(50, Math.floor(textLength / 100));
+
+        // Paragraph density
+        const paragraphs = el.querySelectorAll('p');
+        score += Math.min(30, paragraphs.length * 3);
+
+        // Heading presence
+        const headings = el.querySelectorAll('h1, h2, h3, h4, h5, h6');
+        score += Math.min(15, headings.length * 5);
+
+        // Semantic bonus
+        if (SEMANTIC_TAGS.has(el.tagName)) score += 20;
+        if (el.getAttribute('role') === 'main') score += 20;
+
+        // Navigation penalty: subtract if this element IS inside nav/header/footer
+        const navAncestor = el.closest('nav, header, footer, aside');
+        if (navAncestor) score -= 40;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestCandidate = el;
+        }
       }
+    }
+
+    if (bestCandidate && bestScore >= MIN_SCORE) {
+      return bestCandidate;
     }
 
     return document.body;
   }
 
-  hasSignificantText(element) {
-    const text = element.textContent.trim();
-    return text.length > 50 && text.split(' ').length > 10;
-  }
-
   extractTextElements(container) {
+    const BLOCK_SELECTORS = 'p, h1, h2, h3, h4, h5, h6, li, td, th, figcaption, dt, dd, blockquote';
+    const SKIP_ANCESTORS = ['PRE', 'CODE', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'CANVAS'];
+    // Non-content zones: elements inside these should be skipped even if they match
+    // block selectors. Covers nav bars, footers, sidebars, comments, related posts, etc.
+    const NON_CONTENT_SELECTOR = [
+      'nav',
+      'header',
+      'footer',
+      'aside',
+      '[role="navigation"]',
+      '[role="banner"]',
+      '[role="contentinfo"]',
+      '[role="complementary"]',
+      '.sidebar',
+      '.comments',
+      '.comment-section',
+      '.related-posts',
+      '.related-articles',
+      '.share-buttons',
+      '.social-share',
+      '.newsletter-signup',
+      '.author-bio',
+      '.post-meta',
+      '.breadcrumb',
+      '.pagination',
+      '.table-of-contents',
+      '.toc',
+    ].join(',');
+    const INLINE_TAGS = new Set([
+      'STRONG',
+      'EM',
+      'B',
+      'I',
+      'MARK',
+      'SPAN',
+      'A',
+      'CODE',
+      'KBD',
+      'SAMP',
+      'ABBR',
+      'SUB',
+      'SUP',
+      'VAR',
+      'TIME',
+      'BR',
+      'IMG',
+      'HR',
+      'WBR',
+    ]);
+
     const textElements = [];
-    const processedElements = new Set();
 
     try {
-      // Safety check
       if (!container || !container.nodeType) {
         console.warn('Invalid container provided to extractTextElements');
         return textElements;
       }
 
-      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
-        acceptNode: node => {
-          try {
-            const text = node.textContent.trim();
-            const parent = node.parentElement;
+      const candidates = container.querySelectorAll(BLOCK_SELECTORS);
+      const processedElements = new Set();
 
-            // Safety checks
-            if (!parent || !parent.tagName) {
-              return NodeFilter.FILTER_REJECT;
-            }
-
-            // Skip empty text, scripts, styles, and hidden elements
-            if (
-              !text ||
-              text.length < 5 || // Reduced minimum length to catch more content
-              ['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'CANVAS', 'CODE', 'PRE'].includes(
-                parent.tagName
-              ) ||
-              parent.getAttribute('aria-hidden') === 'true' ||
-              parent.classList.contains('llm-no-translate')
-            ) {
-              return NodeFilter.FILTER_REJECT;
-            }
-
-            // Safe style check
-            try {
-              const style = getComputedStyle(parent);
-              if (style.display === 'none' || style.visibility === 'hidden') {
-                return NodeFilter.FILTER_REJECT;
-              }
-            } catch (styleError) {
-              // If we can't get computed style, continue anyway
-              console.warn('Could not get computed style for element:', styleError);
-            }
-
-            return NodeFilter.FILTER_ACCEPT;
-          } catch (error) {
-            console.warn('Error in acceptNode function:', error);
-            return NodeFilter.FILTER_REJECT;
-          }
-        },
-      });
-
-      let node;
-      let count = 0;
-      const maxNodes = 1000; // Prevent infinite loops
-
-      while ((node = walker.nextNode()) && count < maxNodes) {
-        try {
-          const text = node.textContent.trim();
-          const parent = node.parentElement;
-
-          // Safety checks
-          if (!parent || !text) {
-            count++;
-            continue;
-          }
-
-          // Skip if we've already processed this element
+      for (const element of candidates) {
+        // Skip if ancestor already processed (prevents <p> inside <li> duplication)
+        let ancestorProcessed = false;
+        let parent = element.parentElement;
+        while (parent && parent !== container) {
           if (processedElements.has(parent)) {
-            count++;
-            continue;
+            ancestorProcessed = true;
+            break;
           }
+          parent = parent.parentElement;
+        }
+        if (ancestorProcessed) continue;
 
-          if (text.length >= 5) {
-            // Collect all text nodes within the same parent element
-            const allTextNodes = this.getAllTextNodesInElement(parent);
-            const fullText = allTextNodes
-              .map(n => n.textContent || '')
-              .join('')
-              .trim();
+        // Skip if inside a non-content zone (nav, footer, sidebar, comments, etc.)
+        const nonContentAncestor = element.closest(NON_CONTENT_SELECTOR);
+        if (nonContentAncestor && nonContentAncestor !== container) continue;
 
-            if (fullText.length >= 10) {
-              // Check if element has links and store both text and HTML
-              const hasLinks = parent.querySelector('a[href]');
+        // Skip if inside a skip-ancestor (pre, code, script, etc.)
+        const skipAncestor = element.closest(SKIP_ANCESTORS.join(','));
+        if (skipAncestor && skipAncestor !== element) continue;
 
-              textElements.push({
-                node: node, // Primary text node for reference
-                allTextNodes: allTextNodes, // All text nodes in the element
-                originalText: fullText,
-                originalHTML: hasLinks ? parent.innerHTML : null, // Store HTML if there are links
-                originalInnerHTML: parent.innerHTML, // Always store original innerHTML for restoration
-                hasLinks: hasLinks,
-                element: parent,
-              });
+        // Skip if element itself is a code/pre block
+        if (SKIP_ANCESTORS.includes(element.tagName)) continue;
 
-              processedElements.add(parent);
-            }
-          }
-        } catch (error) {
-          console.warn('Error processing text node:', error);
+        // Skip if hidden
+        if (element.getAttribute('aria-hidden') === 'true') continue;
+        if (element.classList.contains('llm-no-translate')) continue;
+
+        try {
+          const style = getComputedStyle(element);
+          if (style.display === 'none' || style.visibility === 'hidden') continue;
+        } catch (_styleError) {
+          // If we can't get computed style, continue anyway
         }
 
-        count++;
-      }
+        // Skip if contains block-level children (it's a container, not a leaf)
+        // Exception: blockquote may contain <p> which we process separately
+        if (element.tagName === 'BLOCKQUOTE') continue;
+        const hasBlockChildren = element.querySelector(
+          'p, h1, h2, h3, h4, h5, h6, li, td, th, figcaption, dt, dd, blockquote'
+        );
+        if (hasBlockChildren) continue;
 
-      if (count >= maxNodes) {
-        console.warn('Hit maximum node limit in extractTextElements, stopping');
+        // Check text length
+        const text = element.textContent.trim();
+        if (text.length < 10) continue;
+
+        // Detect inline markup: does the element have child elements that are inline?
+        const hasInlineMarkup = Array.from(element.children).some(child =>
+          INLINE_TAGS.has(child.tagName)
+        );
+
+        textElements.push({
+          element,
+          originalText: text,
+          originalInnerHTML: element.innerHTML,
+          hasInlineMarkup,
+        });
+
+        if (this.debug) {
+          const hasLinks = element.querySelector('a') !== null;
+          if (hasLinks && !hasInlineMarkup) {
+            console.warn(`[LLM DEBUG] Element has <a> links but hasInlineMarkup=false!`, {
+              tag: element.tagName,
+              innerHTML: element.innerHTML.substring(0, 200),
+              childrenTags: Array.from(element.children).map(c => c.tagName),
+            });
+          }
+        }
+
+        processedElements.add(element);
+
+        // Safety limit
+        if (textElements.length >= 1000) {
+          console.warn('Hit maximum element limit in extractTextElements, stopping');
+          break;
+        }
       }
     } catch (error) {
       console.error('Error in extractTextElements:', error);
@@ -742,139 +989,32 @@ class LineLocalizationMachine {
     });
   }
 
-  // Helper method to replace links with placeholders and extract link text for translation
-  replaceLinksWithPlaceholders(text, linkMap) {
-    // Safety checks
-    if (typeof text !== 'string') {
-      console.warn('replaceLinksWithPlaceholders: text is not a string:', typeof text);
-      return text || '';
-    }
-
-    if (!linkMap || typeof linkMap !== 'object') {
-      console.warn('replaceLinksWithPlaceholders: linkMap is not an object:', typeof linkMap);
-      return text;
-    }
-
-    let processedText = text;
-    let linkCounter = Object.keys(linkMap).length;
-
-    // Find all links in the text and replace with placeholders
-    const linkRegex = /<a\s+[^>]*href\s*=\s*["']([^"']*)["'][^>]*>(.*?)<\/a>/gi;
-    processedText = processedText.replace(linkRegex, (match, href, linkText) => {
-      linkCounter++;
-      const placeholder = `[LINK_${linkCounter}]`;
-
-      // Store link metadata, including the text that should be translated
-      linkMap[placeholder] = {
-        originalHTML: match,
-        href: href,
-        originalText: linkText,
-        // Extract other attributes from the original link
-        attributes: match.match(/<a\s+([^>]*)>/i)?.[1] || `href="${href}"`,
-      };
-
-      if (this.debug) {
-        console.log(`Replaced link: "${linkText}" -> "${placeholder}" (href: ${href})`);
-      }
-
-      // Return the placeholder followed by the link text (so the link text gets translated)
-      return `${placeholder}${linkText}[/LINK_${linkCounter}]`;
-    });
-
-    return processedText;
-  }
-
-  // Helper method to restore links from placeholders with translated text
-  restoreLinksFromPlaceholders(text, linkMap) {
-    // Safety checks
-    if (typeof text !== 'string') {
-      console.warn('restoreLinksFromPlaceholders: text is not a string:', typeof text);
-      return text || '';
-    }
-
-    if (!linkMap || typeof linkMap !== 'object') {
-      return text;
-    }
-
-    let processedText = text;
-
-    // Replace placeholders with reconstructed links using translated text
-    for (const [placeholder, linkData] of Object.entries(linkMap)) {
-      const linkNumber = placeholder.match(/\[LINK_(\d+)\]/)?.[1];
-      if (!linkNumber) continue;
-
-      const startPlaceholder = `[LINK_${linkNumber}]`;
-      const endPlaceholder = `[/LINK_${linkNumber}]`;
-
-      // Find the translated link text between placeholders
-      const startIndex = processedText.indexOf(startPlaceholder);
-      const endIndex = processedText.indexOf(endPlaceholder);
-
-      if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-        const extractedText = processedText.substring(
-          startIndex + startPlaceholder.length,
-          endIndex
-        );
-        const translatedLinkText = (extractedText || '').trim();
-
-        // Reconstruct the link with translated text
-        const newLink = `<a ${linkData.attributes}>${translatedLinkText}</a>`;
-
-        if (this.debug) {
-          console.log(
-            `Restored link: "${linkData.originalText}" -> "${translatedLinkText}" (href: ${linkData.href})`
-          );
-        }
-
-        // Replace the placeholder section with the new link
-        const placeholderSection = processedText.substring(
-          startIndex,
-          endIndex + endPlaceholder.length
-        );
-        processedText = processedText.replace(placeholderSection, newLink);
-      } else {
-        // Fallback: use original link if placeholders not found properly
-        if (processedText.includes(startPlaceholder)) {
-          processedText = processedText.replace(
-            new RegExp(startPlaceholder.replace(/[[\]]/g, '\\$&'), 'g'),
-            linkData.originalHTML
-          );
-        }
-      }
-    }
-
-    return processedText;
-  }
-
   async translateMultipleBlocks(blocks) {
-    // Prepare link placeholder mapping
-    const linkMap = {};
+    // Per-item placeholder maps (parallel structure to blocks)
+    const placeholderMaps = blocks.map(block =>
+      block.map(item => {
+        if (item.hasInlineMarkup) {
+          return this.serializeForTranslation(item.element);
+        }
+        return { text: item.originalText, placeholderMap: null };
+      })
+    );
 
     // Build JSON structure for translation
     const translationData = {
       targetLanguage: this.getLanguageName(this.translationSettings.targetLanguage),
       blocks: blocks.map((block, blockIndex) => ({
         id: blockIndex,
-        items: block.map(item => {
-          // Use HTML with placeholders for elements with links, otherwise use text
-          if (item.hasLinks && item.originalHTML) {
-            const textWithPlaceholders = this.replaceLinksWithPlaceholders(
-              item.originalHTML,
-              linkMap
-            );
-            if (this.debug) {
-              console.log('Item with links:', {
-                originalText: item.originalText,
-                originalHTML: item.originalHTML,
-                textWithPlaceholders,
-              });
-            }
-            return textWithPlaceholders;
-          }
-          return item.originalText;
-        }),
+        items: placeholderMaps[blockIndex].map(s => s.text),
       })),
     };
+
+    if (this.debug) {
+      console.log('Translation request:', {
+        blockCount: blocks.length,
+        totalItems: translationData.blocks.reduce((sum, b) => sum + b.items.length, 0),
+      });
+    }
 
     try {
       // Call translation API with JSON data
@@ -893,7 +1033,7 @@ class LineLocalizationMachine {
         throw new Error(result.error || 'Translation failed - no blocks returned');
       }
 
-      // Process each translated block
+      // Process each translated block — deserialize placeholders back to HTML
       const results = [];
       for (let i = 0; i < blocks.length; i++) {
         const originalBlock = blocks[i];
@@ -905,20 +1045,38 @@ class LineLocalizationMachine {
           continue;
         }
 
-        // Get translated items and restore links
-        let translatedItems = translatedBlock.items.map((item, itemIndex) => {
+        let translatedItems = translatedBlock.items.map((translatedText, itemIndex) => {
           try {
-            const restored = this.restoreLinksFromPlaceholders(item, linkMap);
-            if (this.debug && item !== restored) {
-              console.log(`Link restoration for block ${i}, item ${itemIndex}:`, {
-                original: item,
-                restored,
+            const pMap = placeholderMaps[i][itemIndex]?.placeholderMap;
+
+            if (this.debug) {
+              console.log(`[LLM DEBUG] block ${i}, item ${itemIndex}:`, {
+                rawFromAPI:
+                  typeof translatedText === 'string'
+                    ? translatedText.substring(0, 200)
+                    : translatedText,
+                hasMap: !!pMap,
+                mapKeys: pMap ? Object.keys(pMap) : null,
+                hasInlineMarkup: blocks[i][itemIndex]?.hasInlineMarkup,
               });
             }
-            return restored;
+
+            const deserialized = this.deserializeFromTranslation(translatedText, pMap);
+
+            if (this.debug) {
+              const hasMarkers = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/.test(deserialized);
+              if (hasMarkers) {
+                console.warn(
+                  `[LLM DEBUG] MARKERS SURVIVED deserialization! block ${i}, item ${itemIndex}:`,
+                  deserialized.substring(0, 200)
+                );
+              }
+            }
+
+            return deserialized;
           } catch (error) {
-            console.warn(`Error restoring links for block ${i}, item ${itemIndex}:`, error);
-            return item;
+            console.warn(`Error deserializing block ${i}, item ${itemIndex}:`, error);
+            return this.stripMarkers(translatedText);
           }
         });
 
@@ -929,12 +1087,10 @@ class LineLocalizationMachine {
           );
 
           if (translatedItems.length < originalBlock.length) {
-            // Pad with original texts
             while (translatedItems.length < originalBlock.length) {
               translatedItems.push(originalBlock[translatedItems.length].originalText);
             }
           } else {
-            // Truncate extra items
             translatedItems = translatedItems.slice(0, originalBlock.length);
           }
         }
@@ -946,7 +1102,6 @@ class LineLocalizationMachine {
     } catch (error) {
       console.error('Batch translation error:', error);
 
-      // If this is a fatal error (like 401, 403, etc.), don't catch it - let it propagate
       if (error.isFatalError) {
         console.error('Fatal error in translateMultipleBlocks, re-throwing:', error);
         throw error;
@@ -955,12 +1110,6 @@ class LineLocalizationMachine {
       // For non-fatal errors, fallback: return original texts for all blocks
       return blocks.map(block => block.map(item => item.originalText));
     }
-  }
-
-  async translateBlock(block) {
-    // Legacy method for single block translation - now uses batch method
-    const result = await this.translateMultipleBlocks([block]);
-    return result[0] || block.map(item => item.originalText);
   }
 
   getLanguageName(languageCode) {
@@ -1071,50 +1220,53 @@ class LineLocalizationMachine {
     element.classList.remove('llm-preparing');
     element.classList.add('llm-fading-out');
 
-    await this.delay(50); // Reduced from 150ms
+    await this.delay(50);
 
     // Phase 2: Store original text and update with translation
+    // Safety net: strip any markers that survived deserialization
+    const cleanText = this.stripMarkers(translatedText);
+
+    if (this.debug) {
+      const markersInRaw = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/.test(translatedText);
+      const markersInClean = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/.test(cleanText);
+      console.log(`[LLM DEBUG] animateLineTransition:`, {
+        tag: element.tagName,
+        hasInlineMarkup: item.hasInlineMarkup,
+        markersInRaw,
+        markersInClean,
+        rawText: translatedText.substring(0, 150),
+        cleanText: cleanText.substring(0, 150),
+        originalInnerHTML: (item.originalInnerHTML || '').substring(0, 150),
+      });
+      if (markersInClean) {
+        console.error(
+          `[LLM DEBUG] MARKERS SURVIVED stripMarkers! This should never happen.`,
+          cleanText
+        );
+      }
+    }
+
     element.setAttribute('data-llm-original', item.originalText);
-    element.setAttribute('data-llm-translated', translatedText);
+    element.setAttribute('data-llm-translated', cleanText);
     element.setAttribute('data-llm-state', 'translated');
+    element.setAttribute('data-llm-original-html', item.originalInnerHTML || element.innerHTML);
 
-    // Simplified and reliable text replacement
+    // Mark whether this element has inline markup (for toggle button logic)
+    if (item.hasInlineMarkup) {
+      element.setAttribute('data-llm-has-markup', 'true');
+    }
+
     try {
-      // Store original content for restoration (use pre-stored original HTML)
-      element.setAttribute('data-llm-original-html', item.originalInnerHTML || element.innerHTML);
-      element.setAttribute('data-llm-original-nodes', JSON.stringify([item.originalText]));
-
-      if (this.debug) {
-        console.log('Text replacement debug:', {
-          originalText: item.originalText,
-          translatedText: translatedText,
-          elementTag: element.tagName,
-          hasLinks: !!element.querySelector('a[href]'),
-          textContentBefore: element.textContent,
-        });
-      }
-
-      // Check if the translated text contains HTML (links were restored)
-      if (translatedText.includes('<a ') && translatedText.includes('</a>')) {
-        // Translation contains HTML links - use sanitized innerHTML
-        if (this.debug) console.log('Text replacement: using sanitized innerHTML (contains links)');
-        element.innerHTML = translatedText;
+      if (item.hasInlineMarkup) {
+        // Translation contains restored HTML — sanitize then set innerHTML
+        element.innerHTML = this.sanitizeHTML(cleanText);
       } else {
-        // Plain text translation - use textContent for safety
-        if (this.debug) console.log('Text replacement: using textContent (plain text)');
-        element.textContent = translatedText;
-      }
-
-      if (this.debug) {
-        console.log('Text replacement result:', {
-          textContentAfter: element.textContent,
-          matches: (element.textContent || '').trim() === (translatedText || '').trim(),
-        });
+        // Plain text — use textContent for safety
+        element.textContent = cleanText;
       }
     } catch (error) {
       console.warn('Text replacement error, using fallback:', error);
-      // Ultimate fallback - completely replace text content
-      element.textContent = translatedText;
+      element.textContent = cleanText;
     }
 
     // Phase 3: Quick fade in with translation animation
@@ -1232,182 +1384,34 @@ class LineLocalizationMachine {
       );
 
       translatedElements.forEach(element => {
-        if (globalShowingOriginals) {
-          // Show original text using enhanced restoration
-          const originalText = element.getAttribute('data-llm-original');
-          const originalHTML = element.getAttribute('data-llm-original-html');
+        const hasMarkup = element.getAttribute('data-llm-has-markup') === 'true';
 
-          if (originalText) {
-            // Try to restore original HTML structure if available
-            if (originalHTML && originalHTML !== originalText) {
-              try {
-                element.innerHTML = originalHTML;
-              } catch (error) {
-                console.warn('Failed to restore original HTML, using text fallback:', error);
-                element.textContent = originalText;
-              }
-            } else {
-              // Try to restore using saved text node structure first
-              if (!this.restoreOriginalTextNodes(element)) {
-                // Fallback: use simple text replacement
-                const textNode = this.findTextNode(element);
-                if (textNode) {
-                  textNode.textContent = originalText;
-                } else {
-                  // Last resort: set entire element text content
-                  element.textContent = originalText;
-                }
-              }
-            }
-            element.setAttribute('data-llm-state', 'showing-original');
-            element.classList.add('llm-showing-original');
+        if (globalShowingOriginals) {
+          // Show original — always restore original innerHTML to preserve formatting
+          const originalHTML = element.getAttribute('data-llm-original-html');
+          if (originalHTML) {
+            element.innerHTML = originalHTML;
+          } else {
+            element.textContent = element.getAttribute('data-llm-original') || '';
           }
+          element.setAttribute('data-llm-state', 'showing-original');
+          element.classList.add('llm-showing-original');
         } else {
           // Show translated text
           const translatedText = element.getAttribute('data-llm-translated');
           if (translatedText) {
-            // Check if the translated text contains HTML links
-            if (translatedText.includes('<a ') && translatedText.includes('</a>')) {
-              // Translation contains HTML - use sanitized innerHTML
-              element.innerHTML = translatedText;
+            const cleanText = this.stripMarkers(translatedText);
+            if (hasMarkup) {
+              element.innerHTML = this.sanitizeHTML(cleanText);
             } else {
-              // Plain text translation - use textContent
-              element.textContent = translatedText;
+              element.textContent = cleanText;
             }
-
             element.setAttribute('data-llm-state', 'translated');
             element.classList.remove('llm-showing-original');
           }
         }
       });
     });
-  }
-
-  getAllTextNodesInElement(element) {
-    // Get all text nodes within an element - safe implementation
-    const textNodes = [];
-
-    try {
-      // Safety check
-      if (!element || !element.nodeType) {
-        return textNodes;
-      }
-
-      const walker = document.createTreeWalker(
-        element,
-        NodeFilter.SHOW_TEXT,
-        {
-          acceptNode: node => {
-            // Safety checks to prevent recursion
-            if (!node || !node.parentElement) {
-              return NodeFilter.FILTER_REJECT;
-            }
-
-            const parent = node.parentElement;
-            const tagName = parent.tagName;
-
-            // Skip script/style tags and other problematic elements
-            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'CANVAS'].includes(tagName)) {
-              return NodeFilter.FILTER_REJECT;
-            }
-
-            // Only accept text nodes that have meaningful content
-            const text = node.textContent;
-            if (!text || typeof text !== 'string' || text.trim().length === 0) {
-              return NodeFilter.FILTER_REJECT;
-            }
-
-            return NodeFilter.FILTER_ACCEPT;
-          },
-        },
-        false
-      );
-
-      let node;
-      let count = 0;
-      const maxNodes = 50; // Prevent infinite loops
-
-      while ((node = walker.nextNode()) && count < maxNodes) {
-        textNodes.push(node);
-        count++;
-      }
-    } catch (error) {
-      console.warn('Error in getAllTextNodesInElement:', error);
-    }
-
-    return textNodes;
-  }
-
-  findTextNode(element) {
-    // Find the primary text node within the element - safe implementation
-    try {
-      if (!element || !element.nodeType) {
-        return null;
-      }
-
-      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null, false);
-      let node;
-      let count = 0;
-      const maxNodes = 20;
-
-      while ((node = walker.nextNode()) && count < maxNodes) {
-        if (node.textContent && node.textContent.trim()) {
-          return node;
-        }
-        count++;
-      }
-    } catch (error) {
-      console.warn('Error in findTextNode:', error);
-    }
-
-    return null;
-  }
-
-  restoreOriginalTextNodes(element) {
-    // Restore original text for elements with multiple text nodes - safe implementation
-    try {
-      if (!element || !element.nodeType) {
-        return false;
-      }
-
-      const originalNodesData = element.getAttribute('data-llm-original-nodes');
-      if (!originalNodesData) {
-        return false;
-      }
-
-      const originalTexts = JSON.parse(originalNodesData);
-      if (!Array.isArray(originalTexts) || originalTexts.length === 0) {
-        return false;
-      }
-
-      // Simple approach: just restore the original text directly
-      const originalText = element.getAttribute('data-llm-original');
-      if (originalText) {
-        element.textContent = originalText;
-        return true;
-      }
-
-      // Fallback: use first item from original texts array
-      if (originalTexts[0]) {
-        element.textContent = originalTexts[0];
-        return true;
-      }
-    } catch (error) {
-      console.warn('Failed to restore original text nodes:', error);
-
-      // Ultimate fallback: try to get original from data attribute
-      try {
-        const originalText = element.getAttribute('data-llm-original');
-        if (originalText) {
-          element.textContent = originalText;
-          return true;
-        }
-      } catch (fallbackError) {
-        console.warn('Fallback restoration also failed:', fallbackError);
-      }
-    }
-
-    return false;
   }
 
   delay(ms) {

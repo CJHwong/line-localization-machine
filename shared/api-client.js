@@ -222,17 +222,18 @@ OUTPUT FORMAT: Valid JSON only. No markdown, no explanation, no code blocks.
 CRITICAL RULES:
 1. Output ONLY valid JSON - no \`\`\` markers, no extra text
 2. Keep exact structure: same block count, same item count per block
-3. Keep [LINK_N]...[/LINK_N] markers exactly, translate only text inside
-4. Keep HTML tags, numbers, URLs, brand names unchanged
-5. Translate naturally for ${targetLanguage} speakers
+3. [T:N]...[/T:N] markers: translate the text BETWEEN them, keep the markers exactly as-is
+4. [O:N] markers: keep exactly where they are, do not modify or remove them
+5. Keep numbers, URLs, brand names unchanged
+6. Translate naturally for ${targetLanguage} speakers
 
 STRUCTURE:
 Input:  {"blocks":[{"id":0,"items":["text1","text2"]},{"id":1,"items":["text3"]}]}
 Output: {"blocks":[{"id":0,"items":["譯文1","譯文2"]},{"id":1,"items":["譯文3"]}]}
 
 EXAMPLE:
-Input:  {"blocks":[{"id":0,"items":["Hello world","Click [LINK_1]here[/LINK_1] to continue"]}]}
-Output: {"blocks":[{"id":0,"items":["你好世界","點擊 [LINK_1]這裡[/LINK_1] 繼續"]}]}
+Input:  {"blocks":[{"id":0,"items":["Hello world","Click [T:1]here[/T:1] to continue [O:2]"]}]}
+Output: {"blocks":[{"id":0,"items":["你好世界","點擊 [T:1]這裡[/T:1] 繼續 [O:2]"]}]}
 
 Translate naturally - not word-for-word. Match the tone of the original.`;
 
