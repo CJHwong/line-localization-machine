@@ -170,6 +170,16 @@ Use the "Test Connection" button in settings to verify:
 
 Test functionality in Chrome by loading the extension in developer mode and verifying translation performance.
 
+## Publishing
+
+When bumping the version for a release, sync the version string across all three locations:
+
+1. `manifest.json` → `"version": "x.y.z"`
+2. `package.json` → `"version": "x.y.z"`
+3. `popup/popup.html` → `<div class="version-info">vx.y.z</div>`
+
+Then run `npm run publish:prep` to validate and build the zip packages.
+
 ## Code Quality & Pre-commit Hooks
 
 The project uses Husky for automated code quality checks:
