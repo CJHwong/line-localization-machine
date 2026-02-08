@@ -118,11 +118,11 @@ class SettingsController {
       const icon = this.elements.toggleApiKey.querySelector('.toggle-icon');
       if (input.type === 'password') {
         input.type = 'text';
-        icon.textContent = '🙈';
+        icon.textContent = '\u25CE';
         this.elements.toggleApiKey.title = 'Hide API key';
       } else {
         input.type = 'password';
-        icon.textContent = '👁';
+        icon.textContent = '\u25C9';
         this.elements.toggleApiKey.title = 'Show API key';
       }
     });
@@ -196,7 +196,7 @@ class SettingsController {
       await chrome.storage.local.set(settings);
 
       if (!silent) {
-        this.showStatus('✅ Settings saved successfully!', 'success');
+        this.showStatus('Settings saved successfully', 'success');
       }
     } catch (error) {
       this.showStatus('Error saving settings', 'error');
@@ -224,7 +224,7 @@ class SettingsController {
 
     try {
       this.elements.testConnection.disabled = true;
-      this.elements.testConnection.textContent = '🔄 Testing...';
+      this.elements.testConnection.textContent = 'Testing...';
       this.showStatus('Testing API connection...', 'loading');
 
       // Use centralized API client for connection test
@@ -240,10 +240,7 @@ class SettingsController {
       );
 
       if (result.success) {
-        this.showStatus(
-          `✅ Connection successful! Model responded: "${result.response}"`,
-          'success'
-        );
+        this.showStatus(`Connection successful — model responded: "${result.response}"`, 'success');
       } else {
         let errorMessage = result.error;
         if (result.errorStatus) {
@@ -252,13 +249,13 @@ class SettingsController {
         if (result.retryAfter) {
           errorMessage += ` (Retry after: ${result.retryAfter}s)`;
         }
-        this.showStatus(`❌ Connection failed: ${errorMessage}`, 'error');
+        this.showStatus(`Connection failed: ${errorMessage}`, 'error');
       }
     } catch (error) {
-      this.showStatus(`❌ Connection failed: ${error.message}`, 'error');
+      this.showStatus(`Connection failed: ${error.message}`, 'error');
     } finally {
       this.elements.testConnection.disabled = false;
-      this.elements.testConnection.textContent = '🔍 Test Connection';
+      this.elements.testConnection.textContent = 'Test Connection';
     }
   }
 
@@ -288,7 +285,7 @@ class SettingsController {
       this.elements.model.value = this.defaultSettings.model;
       this.updateModelSection();
 
-      this.showStatus('🔄 Settings reset to defaults', 'info');
+      this.showStatus('Settings reset to defaults', 'info');
     } catch (error) {
       this.showStatus('Error resetting settings', 'error');
       console.error('Settings reset error:', error);
