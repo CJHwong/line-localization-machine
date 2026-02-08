@@ -19,6 +19,7 @@ class SettingsController {
       temperature: document.getElementById('temperature'),
       reasoningEffort: document.getElementById('reasoningEffort'),
       blocksPerRequest: document.getElementById('blocksPerRequest'),
+      toggleApiKey: document.getElementById('toggleApiKey'),
       testConnection: document.getElementById('testConnection'),
       saveSettings: document.getElementById('saveSettings'),
       resetSettings: document.getElementById('resetSettings'),
@@ -109,6 +110,21 @@ class SettingsController {
     // Model selection change
     this.elements.model.addEventListener('change', () => {
       this.updateModelSection();
+    });
+
+    // API key visibility toggle
+    this.elements.toggleApiKey.addEventListener('click', () => {
+      const input = this.elements.apiKey;
+      const icon = this.elements.toggleApiKey.querySelector('.toggle-icon');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.textContent = '🙈';
+        this.elements.toggleApiKey.title = 'Hide API key';
+      } else {
+        input.type = 'password';
+        icon.textContent = '👁';
+        this.elements.toggleApiKey.title = 'Show API key';
+      }
     });
 
     // Button events

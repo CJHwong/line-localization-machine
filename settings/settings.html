@@ -35,7 +35,12 @@
             <h2>🔑 API Configuration</h2>
             <div class="form-group">
               <label for="apiKey">API Key</label>
-              <input type="password" id="apiKey" placeholder="sk-..." />
+              <div class="input-with-toggle">
+                <input type="password" id="apiKey" placeholder="sk-..." />
+                <button type="button" id="toggleApiKey" class="btn-toggle" title="Show API key">
+                  <span class="toggle-icon">👁</span>
+                </button>
+              </div>
               <small>Your API key is stored locally and never shared</small>
             </div>
 
@@ -185,7 +190,6 @@
               </select>
               <small>More blocks = better context for translation, but larger API calls</small>
             </div>
-
           </section>
         </div>
       </main>
