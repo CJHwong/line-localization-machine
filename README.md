@@ -73,6 +73,107 @@ The extension supports any OpenAI-compatible API endpoint:
 
 Simply select "Custom Model..." and enter the exact model identifier used by your API provider.
 
+## 🧪 Testing
+
+### Prerequisites
+
+```bash
+npm install
+npx playwright install chromium
+```
+
+### Unit & Integration Tests
+
+```bash
+npm test              # Run all Jest tests (unit + integration)
+npm run test:unit     # Unit tests only
+npm run test:integration  # Integration tests only
+```
+
+### E2E Tests
+
+E2E tests use Playwright to load the real extension in Chromium and verify the full translation pipeline.
+
+#### Mock Server (required for non-live E2E tests)
+
+Start the mock server in a separate terminal before running E2E tests:
+
+```bash
+npm run test:mock-server
+```
+
+The mock server runs on `http://localhost:3001` and provides:
+
+- `POST /v1/chat/completions` — mock OpenAI-compatible translation API
+- `POST /test/reset` — reset server state
+- `POST /test/mode` — set translation/marker behavior
+- `GET /test/stats` — request count and current config
+- Static file serving for test HTML pages
+
+#### Smoke Test
+
+Quick check that the extension loads and can translate:
+
+```bash
+npm run test:e2e
+```
+
+#### Pipeline Test
+
+Comprehensive test that verifies marker cleanup, link preservation, inline element preservation, content zone detection, and toggle button behavior:
+
+```bash
+# With mock server (start mock server first)
+npm run test:pipeline
+
+# With mock server — test LLM marker misbehavior
+npm run test:pipeline:contaminate  # LLM adds fake markers
+npm run test:pipeline:drop         # LLM strips markers
+```
+
+#### Live API Testing
+
+Test against real LLM providers instead of the mock server:
+
+```bash
+# OpenAI (reads $OPENAI_API_KEY)
+npm run test:pipeline:live
+
+# Custom provider
+node tests/e2e/test-translation-pipeline.js --live \
+  --api-key-env=OLLAMA_API_KEY \
+  --endpoint=https://ollama.com/v1/ \
+  --model=ministral-3:8b-cloud
+
+# Test on a specific URL
+node tests/e2e/test-translation-pipeline.js --live \
+  --url=https://example.com/article \
+  --lang=japanese
+```
+
+**Pipeline test flags:**
+
+| Flag                | Description                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `--live`            | Use real LLM API instead of mock server                           |
+| `--endpoint=URL`    | API endpoint (default: `https://api.openai.com/v1`)               |
+| `--model=MODEL`     | Model name (default: `gpt-4o-mini`)                               |
+| `--api-key-env=VAR` | Env var holding the API key (default: `OPENAI_API_KEY`)           |
+| `--url=URL`         | Translate a custom URL instead of the test page                   |
+| `--lang=LANG`       | Target language (default: `spanish`)                              |
+| `--headed`          | Show browser window                                               |
+| `--keep-open`       | Keep browser open after test for manual inspection                |
+| `--markers=MODE`    | Mock server marker behavior: `preserve`, `drop`, or `contaminate` |
+
+### Linting & Formatting
+
+```bash
+npm run lint          # Check with ESLint
+npm run lint:fix      # Auto-fix lint issues
+npm run format        # Format with Prettier
+npm run format:check  # Check formatting
+```
+
 ## 📄 License
 
 MIT License - feel free to modify and distribute
