@@ -11,8 +11,7 @@ A modern browser extension that provides AI-powered line-by-line webpage transla
 ## ✨ Features
 
 - **OpenAI Compatible**: Works with OpenAI API and other compatible endpoints
-- **Intelligent Pipeline Translation**: Translates webpage content with background processing for maximum efficiency
-- **Batch Processing**: Combines 3-8 blocks per API request to reduce costs and improve speed
+- **Streaming Translation**: Single streaming API request per page with progressive rendering as blocks complete
 - **15 Languages**: Support for major world languages with flag emojis
 - **Bring Your Own Key**: API keys stored locally, never shared
 
@@ -24,7 +23,7 @@ A modern browser extension that provides AI-powered line-by-line webpage transla
 2. Click the Line Localization Machine extension icon
 3. Optionally select a different target language from the dropdown
 4. Click "Translate Page"
-5. Watch as content gets translated in batches with pipeline processing!
+5. Watch as content gets translated with streaming, line-by-line rendering!
 6. Use the toggle button (top-right of page) to switch between original and translated text
 
 ## ⚙️ Configuration
@@ -37,7 +36,6 @@ A modern browser extension that provides AI-powered line-by-line webpage transla
   - **Predefined**: GPT-4o Mini, GPT-5 Mini, GPT-5 Nano
   - **Custom**: Any model ID supported by your API provider
 - **Target Language**: Select from 15 supported languages (Traditional Chinese is default)
-- **Blocks Per Request**: Configure batch size (3, 5, or 8 blocks per API call)
 
 ### Supported Languages (15 Languages with Flags)
 

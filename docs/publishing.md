@@ -159,7 +159,7 @@ Before publishing, ensure you have:
 
 ### For Both Stores
 
-1. **Increment Version**: Update version in `package.json` and `manifest.json`
+1. **Increment Version**: Update version in `manifest.json` and `package.json` (2 files only)
 2. **Pre-publication Checklist**:
    - Set `DEBUG = false` in `shared/debug.js`
    - Run `npm run lint:fix && npm run format`
