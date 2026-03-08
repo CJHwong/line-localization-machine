@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Dark rounded background -->
+  <rect width="128" height="128" rx="20" fill="#2d2a25"/>
+  <!-- Original text lines (white, left-aligned) -->
+  <rect x="24" y="28" width="80" height="10" rx="3" fill="#ffffff"/>
+  <rect x="24" y="50" width="56" height="10" rx="3" fill="#ffffff"/>
+  <!-- Translated text lines (amber, shifted right) -->
+  <rect x="32" y="72" width="72" height="10" rx="3" fill="#d97706"/>
+  <rect x="32" y="94" width="48" height="10" rx="3" fill="#d97706"/>
+</svg>
