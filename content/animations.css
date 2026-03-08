@@ -1,60 +1,31 @@
 /* Line Localization Machine — Animation Styles
-   Design: typographic margin markers — a precision instrument annotating a manuscript.
-   Each phase uses a left-border accent + subtle background shift.
-   Colors: warm amber (#d97706) for in-progress, dark ink (#2d2a25) for completed. */
+   Design: invisible when settled. Translations become the page.
+   Only transient visual cues during the translation process. */
 
 /* ─────────────────────────────────────────────
    Phase 1: PREPARING — queued, waiting for translation
-   A slow scanning line sweeps left-to-right across the block,
-   like a reading head traversing the text.
+   Gentle opacity pulse. No borders, no pseudo-elements.
    ───────────────────────────────────────────── */
 .llm-preparing {
-  position: relative;
-  border-left: 2px solid rgba(217, 119, 6, 0.4);
-  padding-left: 6px;
-  overflow: hidden;
+  animation: llm-breathe 1.8s ease-in-out infinite;
 }
 
-.llm-preparing::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, rgba(217, 119, 6, 0.06) 0%, rgba(217, 119, 6, 0) 60%);
-  animation: llm-scan 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  pointer-events: none;
-}
-
-@keyframes llm-scan {
-  0% {
-    transform: translateX(-100%);
-    opacity: 0;
-  }
-  10% {
-    opacity: 1;
-  }
-  90% {
-    opacity: 1;
-  }
+@keyframes llm-breathe {
+  0%,
   100% {
-    transform: translateX(100%);
-    opacity: 0;
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
   }
 }
 
 /* ─────────────────────────────────────────────
    Phase 2: FADING OUT — original text dissolving
-   Quick, precise. No scale transform — just opacity
-   drop with a subtle vertical clip.
+   Quick opacity drop. Clean and precise.
    ───────────────────────────────────────────── */
 .llm-fading-out {
-  position: relative;
-  animation: llm-fade-out 0.06s cubic-bezier(0.4, 0, 1, 1) forwards;
-  overflow: hidden;
-  border-left: 2px solid rgba(217, 119, 6, 0.2);
-  padding-left: 6px;
+  animation: llm-fade-out 0.08s ease-out forwards;
 }
 
 @keyframes llm-fade-out {
@@ -62,29 +33,25 @@
     opacity: 1;
   }
   100% {
-    opacity: 0.15;
+    opacity: 0;
   }
 }
 
 /* ─────────────────────────────────────────────
    Phase 3: TRANSLATED — new content reveal
-   The left border solidifies to dark ink. Background
-   briefly warms then fades. A clean mechanical reveal.
+   Fade in with a brief warm background flash
+   that disappears. The text arrives.
    ───────────────────────────────────────────── */
 .llm-translated {
-  position: relative;
-  animation: llm-reveal 0.18s cubic-bezier(0, 0, 0.2, 1) forwards;
-  border-left: 2px solid #2d2a25;
-  padding-left: 6px;
-  margin: 1px 0;
+  animation: llm-reveal 0.25s cubic-bezier(0, 0, 0.2, 1) forwards;
 }
 
 @keyframes llm-reveal {
   0% {
-    opacity: 0.15;
+    opacity: 0;
     background-color: rgba(217, 119, 6, 0.06);
   }
-  50% {
+  40% {
     opacity: 1;
     background-color: rgba(217, 119, 6, 0.04);
   }
@@ -96,131 +63,48 @@
 
 /* ─────────────────────────────────────────────
    Phase 4: SETTLED — final resting state
-   Minimal. A thin warm-gray left border as permanent
-   margin marker. Almost invisible until you hover.
+   Nothing. Zero styling. The translation is the page.
    ───────────────────────────────────────────── */
 .llm-settled {
-  position: relative;
-  border-left: 2px solid #e0ded7;
-  padding-left: 6px;
-  margin: 1px 0;
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease;
-}
-
-.llm-settled:hover {
-  border-left-color: #d97706;
-  background-color: rgba(217, 119, 6, 0.03);
+  /* intentionally empty — no visual distinction */
 }
 
 /* ─────────────────────────────────────────────
    ERROR — translation failed for this block
-   Sharp red left border, single tight shake.
+   Brief red background flash, then fades.
    ───────────────────────────────────────────── */
 .llm-error {
-  position: relative;
-  animation: llm-error-shake 0.25s cubic-bezier(0.36, 0.07, 0.19, 0.97);
-  border-left: 2px solid #dc2626;
-  padding-left: 6px;
-  margin: 1px 0;
-  background-color: rgba(220, 38, 38, 0.03);
+  animation: llm-error-flash 0.6s ease-out forwards;
 }
 
-@keyframes llm-error-shake {
-  0%,
+@keyframes llm-error-flash {
+  0% {
+    background-color: rgba(220, 38, 38, 0.08);
+  }
   100% {
-    transform: translateX(0);
-  }
-  20% {
-    transform: translateX(-3px);
-  }
-  40% {
-    transform: translateX(2px);
-  }
-  60% {
-    transform: translateX(-1px);
-  }
-  80% {
-    transform: translateX(1px);
-  }
-}
-
-/* ─────────────────────────────────────────────
-   BLOCK LOADING — spinner on actively-translating blocks
-   Small amber dot spinner, positioned in the left margin.
-   ───────────────────────────────────────────── */
-.llm-block-loading {
-  position: relative;
-}
-
-.llm-block-loading::after {
-  content: '';
-  position: absolute;
-  left: -12px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 6px;
-  height: 6px;
-  border: 1.5px solid rgba(217, 119, 6, 0.25);
-  border-radius: 50%;
-  border-top-color: #d97706;
-  animation: llm-spin 0.8s linear infinite;
-}
-
-@keyframes llm-spin {
-  to {
-    transform: translateY(-50%) rotate(360deg);
+    background-color: rgba(220, 38, 38, 0.03);
   }
 }
 
 /* ─────────────────────────────────────────────
    SHOWING ORIGINAL — toggled back to original text
-   Amber left border replaces the settled gray.
+   Subtle warm background so user knows what's toggled.
    ───────────────────────────────────────────── */
 .llm-showing-original {
-  border-left: 2px solid #d97706 !important;
-  padding-left: 6px !important;
-  background-color: rgba(217, 119, 6, 0.03) !important;
-  transition: all 0.15s ease;
+  background-color: rgba(217, 119, 6, 0.04);
+  transition: background-color 0.15s ease;
 }
 
 /* ─────────────────────────────────────────────
-   Responsive — tighter spacing on mobile
-   ───────────────────────────────────────────── */
-@media (max-width: 768px) {
-  .llm-preparing,
-  .llm-fading-out,
-  .llm-translated,
-  .llm-settled,
-  .llm-error,
-  .llm-showing-original {
-    padding-left: 4px;
-  }
-}
-
-/* ─────────────────────────────────────────────
-   Dark mode — increase opacity for visibility
+   Dark mode
    ───────────────────────────────────────────── */
 @media (prefers-color-scheme: dark) {
-  .llm-preparing {
-    border-left-color: rgba(251, 191, 36, 0.5);
-  }
-
-  .llm-preparing::after {
-    background: linear-gradient(90deg, rgba(251, 191, 36, 0.08) 0%, rgba(251, 191, 36, 0) 60%);
-  }
-
-  .llm-translated {
-    border-left-color: #e2e8f0;
-  }
-
   @keyframes llm-reveal {
     0% {
-      opacity: 0.15;
+      opacity: 0;
       background-color: rgba(251, 191, 36, 0.08);
     }
-    50% {
+    40% {
       opacity: 1;
       background-color: rgba(251, 191, 36, 0.04);
     }
@@ -230,23 +114,21 @@
     }
   }
 
-  .llm-settled {
-    border-left-color: rgba(226, 232, 240, 0.15);
-  }
-
-  .llm-settled:hover {
-    border-left-color: #fbbf24;
-    background-color: rgba(251, 191, 36, 0.05);
-  }
-
   .llm-error {
-    border-left-color: #f87171;
-    background-color: rgba(248, 113, 113, 0.06);
+    animation-name: llm-error-flash-dark;
+  }
+
+  @keyframes llm-error-flash-dark {
+    0% {
+      background-color: rgba(248, 113, 113, 0.1);
+    }
+    100% {
+      background-color: rgba(248, 113, 113, 0.04);
+    }
   }
 
   .llm-showing-original {
-    border-left-color: #fbbf24 !important;
-    background-color: rgba(251, 191, 36, 0.05) !important;
+    background-color: rgba(251, 191, 36, 0.05);
   }
 }
 
@@ -254,27 +136,23 @@
    Accessibility — reduce motion
    ───────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .llm-preparing::after {
-    animation: none !important;
-    transform: none;
-    opacity: 0.5;
+  .llm-preparing {
+    animation: none;
+    opacity: 0.6;
   }
 
   .llm-fading-out {
-    animation: none !important;
-    opacity: 0.15;
+    animation: none;
+    opacity: 0;
   }
 
   .llm-translated {
-    animation: none !important;
+    animation: none;
     opacity: 1;
   }
 
   .llm-error {
-    animation: none !important;
-  }
-
-  .llm-settled {
-    transition: none !important;
+    animation: none;
+    background-color: rgba(220, 38, 38, 0.03);
   }
 }
