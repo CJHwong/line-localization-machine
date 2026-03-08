@@ -11,6 +11,7 @@ module.exports = [
       'web-ext-artifacts/**',
       'manifest.json',
       '**/purify.min.js',
+      'vendor/**',
     ],
   },
   {
@@ -40,6 +41,14 @@ module.exports = [
         alert: 'readonly',
         getComputedStyle: 'readonly',
         eval: 'readonly',
+
+        // Vendored libraries (loaded as content scripts before content-script.js)
+        Readability: 'readonly',
+        isProbablyReaderable: 'readonly',
+
+        // Content script modules (loaded before content-script.js)
+        TextExtraction: 'readonly',
+        Animation: 'readonly',
 
         // Node.js globals (for config files)
         process: 'readonly',

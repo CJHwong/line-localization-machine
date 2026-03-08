@@ -1,11 +1,10 @@
-// Content scripts now use chrome.runtime directly (standardized across browsers)
-
 // Content scripts use background script for API calls (dynamic imports don't work reliably in content scripts)
+// TextExtraction and Animation are loaded via manifest.json content_scripts before this file.
 
 class LineLocalizationMachine {
   constructor() {
     this.isTranslating = false;
-    this.originalContent = new Map();
+    this.translatedElements = new Map(); // element → { originalHTML, translatedHTML }
     this.translationSettings = null;
     this.animationQueue = [];
     this.translationHistory = []; // Store translation pairs for context
@@ -15,186 +14,6 @@ class LineLocalizationMachine {
     this.debug = false; // Set to true for verbose logging
 
     this.init();
-  }
-
-  // ─── Pure helper methods for inline element preservation ───────────────────
-
-  /**
-   * Strip all [T:N], [/T:N], and [O:N] markers from text.
-   * Used as a safety net at every output boundary to ensure markers never reach the DOM.
-   */
-  stripMarkers(text) {
-    if (typeof text !== 'string') return String(text ?? '');
-    return text
-      .replace(/\[T:\d+\]/g, '')
-      .replace(/\[\/T:\d+\]/g, '')
-      .replace(/\[O:\d+\]/g, '');
-  }
-
-  /**
-   * Sanitize HTML string: strip dangerous elements and event-handler attributes.
-   * Uses a temp <div> to parse, then removes threats before returning innerHTML.
-   */
-  sanitizeHTML(html) {
-    if (!html) return '';
-    const temp = document.createElement('div');
-    temp.innerHTML = html;
-
-    // Remove dangerous elements
-    const dangerousTags = ['script', 'iframe', 'object', 'embed', 'form'];
-    for (const tag of dangerousTags) {
-      const els = temp.querySelectorAll(tag);
-      for (const el of els) el.remove();
-    }
-
-    // Remove event-handler attributes and javascript: hrefs from all elements
-    const allEls = temp.querySelectorAll('*');
-    for (const el of allEls) {
-      const attrsToRemove = [];
-      for (const attr of el.attributes) {
-        if (attr.name.startsWith('on')) {
-          attrsToRemove.push(attr.name);
-        }
-      }
-      for (const name of attrsToRemove) {
-        el.removeAttribute(name);
-      }
-      // Strip javascript: hrefs
-      const href = el.getAttribute('href');
-      if (href && href.trim().toLowerCase().startsWith('javascript:')) {
-        el.removeAttribute('href');
-      }
-    }
-
-    return temp.innerHTML;
-  }
-
-  /**
-   * Serialize an element's children into text with placeholder markers.
-   *
-   * - Text nodes → pass through as-is
-   * - Translatable inline elements (STRONG, EM, B, I, MARK, SPAN, A) →
-   *   [T:N]textContent[/T:N], storing tag name + attributes in map
-   * - Opaque inline elements (CODE, KBD, SAMP, ABBR, SUB, SUP, VAR, TIME) →
-   *   [O:N], storing full outerHTML in map
-   * - Self-closing (BR, IMG, HR, WBR) → [O:N], storing outerHTML
-   * - Unknown elements → treated as opaque
-   *
-   * Returns { text: string, placeholderMap: object | null }
-   */
-  serializeForTranslation(element) {
-    const TRANSLATABLE_TAGS = new Set(['STRONG', 'EM', 'B', 'I', 'MARK', 'SPAN', 'A']);
-    const OPAQUE_TAGS = new Set(['CODE', 'KBD', 'SAMP', 'ABBR', 'SUB', 'SUP', 'VAR', 'TIME']);
-    const SELF_CLOSING_TAGS = new Set(['BR', 'IMG', 'HR', 'WBR']);
-
-    const map = {};
-    let counter = 0;
-    let hasAnyPlaceholder = false;
-
-    const walk = node => {
-      let result = '';
-      for (const child of node.childNodes) {
-        if (child.nodeType === 3 /* TEXT_NODE */) {
-          result += child.textContent;
-        } else if (child.nodeType === 1 /* ELEMENT_NODE */) {
-          const tag = child.tagName;
-
-          if (SELF_CLOSING_TAGS.has(tag)) {
-            counter++;
-            hasAnyPlaceholder = true;
-            map[String(counter)] = { type: 'opaque', outerHTML: child.outerHTML };
-            result += `[O:${counter}]`;
-          } else if (OPAQUE_TAGS.has(tag)) {
-            counter++;
-            hasAnyPlaceholder = true;
-            map[String(counter)] = { type: 'opaque', outerHTML: child.outerHTML };
-            result += `[O:${counter}]`;
-          } else if (TRANSLATABLE_TAGS.has(tag)) {
-            counter++;
-            hasAnyPlaceholder = true;
-            // Collect attributes as a string
-            const attrs = Array.from(child.attributes)
-              .map(a => `${a.name}="${a.value}"`)
-              .join(' ');
-            map[String(counter)] = { type: 'translatable', tag, attrs };
-            // Recurse into children for nested translatable elements
-            const innerText = walk(child);
-            result += `[T:${counter}]${innerText}[/T:${counter}]`;
-          } else {
-            // Unknown element → treat as opaque
-            counter++;
-            hasAnyPlaceholder = true;
-            map[String(counter)] = { type: 'opaque', outerHTML: child.outerHTML };
-            result += `[O:${counter}]`;
-          }
-        }
-      }
-      return result;
-    };
-
-    const text = walk(element);
-    return {
-      text,
-      placeholderMap: hasAnyPlaceholder ? map : null,
-    };
-  }
-
-  /**
-   * Deserialize translated text by restoring placeholders to HTML.
-   *
-   * Two passes:
-   * 1. Replace [O:N] → stored outerHTML
-   * 2. Replace [T:N]...content...[/T:N] → <tag attrs>content</tag> (inside-out)
-   * 3. Cleanup: strip any orphaned markers
-   */
-  deserializeFromTranslation(text, map) {
-    // Coerce to string to prevent TypeError on non-string LLM output
-    let result = typeof text === 'string' ? text : String(text ?? '');
-
-    // If we have a map, restore markers to HTML
-    if (map) {
-      // Pass 1: Replace opaque markers [O:N]
-      result = result.replace(/\[O:(\d+)\]/g, (match, id) => {
-        const entry = map[id];
-        if (entry && entry.type === 'opaque') {
-          return entry.outerHTML;
-        }
-        return match; // will be cleaned up below
-      });
-
-      // Pass 2: Replace translatable markers [T:N]...[/T:N] — inside-out
-      // Loop until no more replacements, handling nesting
-      let changed = true;
-      let iterations = 0;
-      const MAX_ITERATIONS = 20;
-      while (changed && iterations < MAX_ITERATIONS) {
-        changed = false;
-        iterations++;
-        result = result.replace(
-          /\[T:(\d+)\]((?:(?!\[T:\d+\])[\s\S])*?)\[\/T:\1\]/g,
-          (match, id, content) => {
-            const entry = map[id];
-            if (entry && entry.type === 'translatable') {
-              changed = true;
-              const tagLower = entry.tag.toLowerCase();
-              const attrStr = entry.attrs ? ` ${entry.attrs}` : '';
-              return `<${tagLower}${attrStr}>${content}</${tagLower}>`;
-            }
-            return match;
-          }
-        );
-      }
-
-      // Pass 3: Strip orphaned paired markers not in our map (keep content)
-      result = result.replace(/\[T:(\d+)\]([\s\S]*?)\[\/T:\1\]/g, (match, id, content) => {
-        if (!map[id]) return content;
-        return match;
-      });
-    }
-
-    // Always strip any remaining markers — even without a map, the LLM may
-    // cross-contaminate markers from other items in the same batch
-    return this.stripMarkers(result);
   }
 
   async init() {
@@ -208,7 +27,6 @@ class LineLocalizationMachine {
         // Store tab ID from message or sender
         this.tabId = message.tabId || (sender && sender.tab && sender.tab.id) || null;
 
-        // Enhanced debugging for tab ID tracking
         if (this.debug) {
           console.log(`[TabID Debug] Content script received translation request:`, {
             tabIdFromMessage: message.tabId,
@@ -233,34 +51,23 @@ class LineLocalizationMachine {
 
   async performSelfCleanup() {
     try {
-      // Get current tab ID for cleanup
-      const response = await chrome.runtime.sendMessage({
-        action: 'GET_CURRENT_TAB_ID',
-      });
+      const response = await chrome.runtime.sendMessage({ action: 'GET_CURRENT_TAB_ID' });
 
       if (response?.success && response.tabId) {
         const currentTabId = response.tabId;
-
         if (this.debug) {
           console.log(
             `[ContentScript] Self-cleanup: clearing any stale state for tab ${currentTabId}`
           );
         }
-
-        // Clear any existing translation state for this tab
         await chrome.runtime.sendMessage({
           action: 'CLEAR_TRANSLATION_STATE',
           tabId: currentTabId,
         });
-
-        if (this.debug) {
-          console.log(`[ContentScript] Self-cleanup completed for tab ${currentTabId}`);
-        }
       } else {
         console.warn('[ContentScript] Self-cleanup: Could not determine tab ID');
       }
     } catch (error) {
-      // Silent fail - don't break content script loading if cleanup fails
       console.warn('[ContentScript] Self-cleanup failed (non-critical):', error);
     }
   }
@@ -270,40 +77,29 @@ class LineLocalizationMachine {
       throw new Error('Translation already in progress');
     }
 
-    // Validate settings with safe string checking
-    if (
-      !settings.apiKey ||
-      typeof settings.apiKey !== 'string' ||
-      settings.apiKey.trim().length === 0
-    ) {
+    // Validate settings
+    if (!settings.apiKey || typeof settings.apiKey !== 'string' || !settings.apiKey.trim()) {
       throw new Error('API key is required');
     }
-
-    if (
-      !settings.model ||
-      typeof settings.model !== 'string' ||
-      settings.model.trim().length === 0
-    ) {
+    if (!settings.model || typeof settings.model !== 'string' || !settings.model.trim()) {
       throw new Error('Model is required');
     }
-
     if (
       !settings.targetLanguage ||
       typeof settings.targetLanguage !== 'string' ||
-      settings.targetLanguage.trim().length === 0
+      !settings.targetLanguage.trim()
     ) {
       throw new Error('Target language is required');
     }
 
     this.isTranslating = true;
     this.translationSettings = settings;
-    this.translationHistory = []; // Reset history for new translation session
+    this.translationHistory = [];
     this.completedBlocks = 0;
 
-    // Clear any existing progress indicators or error states from previous translations
+    // Clear any existing progress indicators from previous translations
     this.clearPreviousTranslationState();
 
-    // Notify background script that translation started
     this.updateTranslationState({
       isTranslating: true,
       status: 'starting',
@@ -313,11 +109,11 @@ class LineLocalizationMachine {
     });
 
     try {
-      // Find main content area
-      const contentArea = this.findMainContent();
+      // Identify article content via Readability (or null for fallback)
+      const articleData = TextExtraction.identifyArticleContent();
 
-      // Extract text lines
-      const textElements = this.extractTextElements(contentArea);
+      // Extract translatable text elements, filtered by article content
+      const textElements = TextExtraction.extractTextElements(document.body, articleData);
 
       if (textElements.length === 0) {
         throw new Error('No translatable content found on this page');
@@ -332,10 +128,8 @@ class LineLocalizationMachine {
         });
       }
 
-      // Start translation process with animations
       await this.translateWithAnimations(textElements);
 
-      // Notify completion
       this.updateTranslationState({
         isTranslating: false,
         status: 'completed',
@@ -344,17 +138,17 @@ class LineLocalizationMachine {
         completedBlocks: this.completedBlocks,
       });
 
-      // Play completion sound if enabled
       if (this.translationSettings.playSound) {
-        this.playCompletionSound();
+        Animation.playCompletionSound();
       }
 
-      // Clear state after a short delay
-      setTimeout(() => {
-        this.clearTranslationState();
-      }, this.getAdjustedTiming(3000));
+      setTimeout(
+        () => {
+          this.clearTranslationState();
+        },
+        Animation.getAdjustedTiming(3000, this.translationSettings)
+      );
     } catch (error) {
-      // Notify error
       this.updateTranslationState({
         isTranslating: false,
         status: 'error',
@@ -364,10 +158,12 @@ class LineLocalizationMachine {
         error: error.message,
       });
 
-      // Clear error state after a delay
-      setTimeout(() => {
-        this.clearTranslationState();
-      }, this.getAdjustedTiming(5000));
+      setTimeout(
+        () => {
+          this.clearTranslationState();
+        },
+        Animation.getAdjustedTiming(5000, this.translationSettings)
+      );
 
       throw error;
     } finally {
@@ -375,228 +171,13 @@ class LineLocalizationMachine {
     }
   }
 
-  findMainContent() {
-    const CANDIDATE_SELECTORS = [
-      'main',
-      '[role="main"]',
-      'article',
-      '.content',
-      '#content',
-      '.main-content',
-      '.post-content',
-      '.entry-content',
-      '.article-content',
-      '.body.markup', // Substack
-      '.meteredContent', // Medium
-      '.md', // Reddit markdown
-      '.container',
-      '.wrapper',
-    ];
-    const NAV_TAGS = new Set(['NAV', 'HEADER', 'FOOTER', 'ASIDE']);
-    const SEMANTIC_TAGS = new Set(['MAIN', 'ARTICLE']);
-    const MIN_SCORE = 50;
-
-    let bestCandidate = null;
-    let bestScore = -1;
-
-    for (const selector of CANDIDATE_SELECTORS) {
-      const elements = document.querySelectorAll(selector);
-      for (const el of elements) {
-        // Skip navigation containers
-        if (NAV_TAGS.has(el.tagName)) continue;
-
-        const textLength = (el.textContent || '').trim().length;
-        if (textLength < 50) continue;
-
-        let score = 0;
-
-        // Text length contribution (1 point per 100 chars, capped at 50)
-        score += Math.min(50, Math.floor(textLength / 100));
-
-        // Paragraph density
-        const paragraphs = el.querySelectorAll('p');
-        score += Math.min(30, paragraphs.length * 3);
-
-        // Heading presence
-        const headings = el.querySelectorAll('h1, h2, h3, h4, h5, h6');
-        score += Math.min(15, headings.length * 5);
-
-        // Semantic bonus
-        if (SEMANTIC_TAGS.has(el.tagName)) score += 20;
-        if (el.getAttribute('role') === 'main') score += 20;
-
-        // Navigation penalty: subtract if this element IS inside nav/header/footer
-        const navAncestor = el.closest('nav, header, footer, aside');
-        if (navAncestor) score -= 40;
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestCandidate = el;
-        }
-      }
-    }
-
-    if (bestCandidate && bestScore >= MIN_SCORE) {
-      return bestCandidate;
-    }
-
-    return document.body;
-  }
-
-  extractTextElements(container) {
-    const BLOCK_SELECTORS = 'p, h1, h2, h3, h4, h5, h6, li, td, th, figcaption, dt, dd, blockquote';
-    const SKIP_ANCESTORS = ['PRE', 'CODE', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'CANVAS'];
-    // Non-content zones: elements inside these should be skipped even if they match
-    // block selectors. Covers nav bars, footers, sidebars, comments, related posts, etc.
-    const NON_CONTENT_SELECTOR = [
-      'nav',
-      'header',
-      'footer',
-      'aside',
-      '[role="navigation"]',
-      '[role="banner"]',
-      '[role="contentinfo"]',
-      '[role="complementary"]',
-      '.sidebar',
-      '.comments',
-      '.comment-section',
-      '.related-posts',
-      '.related-articles',
-      '.share-buttons',
-      '.social-share',
-      '.newsletter-signup',
-      '.author-bio',
-      '.post-meta',
-      '.breadcrumb',
-      '.pagination',
-      '.table-of-contents',
-      '.toc',
-    ].join(',');
-    const INLINE_TAGS = new Set([
-      'STRONG',
-      'EM',
-      'B',
-      'I',
-      'MARK',
-      'SPAN',
-      'A',
-      'CODE',
-      'KBD',
-      'SAMP',
-      'ABBR',
-      'SUB',
-      'SUP',
-      'VAR',
-      'TIME',
-      'BR',
-      'IMG',
-      'HR',
-      'WBR',
-    ]);
-
-    const textElements = [];
-
-    try {
-      if (!container || !container.nodeType) {
-        console.warn('Invalid container provided to extractTextElements');
-        return textElements;
-      }
-
-      const candidates = container.querySelectorAll(BLOCK_SELECTORS);
-      const processedElements = new Set();
-
-      for (const element of candidates) {
-        // Skip if ancestor already processed (prevents <p> inside <li> duplication)
-        let ancestorProcessed = false;
-        let parent = element.parentElement;
-        while (parent && parent !== container) {
-          if (processedElements.has(parent)) {
-            ancestorProcessed = true;
-            break;
-          }
-          parent = parent.parentElement;
-        }
-        if (ancestorProcessed) continue;
-
-        // Skip if inside a non-content zone (nav, footer, sidebar, comments, etc.)
-        const nonContentAncestor = element.closest(NON_CONTENT_SELECTOR);
-        if (nonContentAncestor && nonContentAncestor !== container) continue;
-
-        // Skip if inside a skip-ancestor (pre, code, script, etc.)
-        const skipAncestor = element.closest(SKIP_ANCESTORS.join(','));
-        if (skipAncestor && skipAncestor !== element) continue;
-
-        // Skip if element itself is a code/pre block
-        if (SKIP_ANCESTORS.includes(element.tagName)) continue;
-
-        // Skip if hidden
-        if (element.getAttribute('aria-hidden') === 'true') continue;
-        if (element.classList.contains('llm-no-translate')) continue;
-
-        try {
-          const style = getComputedStyle(element);
-          if (style.display === 'none' || style.visibility === 'hidden') continue;
-        } catch (_styleError) {
-          // If we can't get computed style, continue anyway
-        }
-
-        // Skip if contains block-level children (it's a container, not a leaf)
-        // Exception: blockquote may contain <p> which we process separately
-        if (element.tagName === 'BLOCKQUOTE') continue;
-        const hasBlockChildren = element.querySelector(
-          'p, h1, h2, h3, h4, h5, h6, li, td, th, figcaption, dt, dd, blockquote'
-        );
-        if (hasBlockChildren) continue;
-
-        // Check text length
-        const text = element.textContent.trim();
-        if (text.length < 10) continue;
-
-        // Detect inline markup: does the element have child elements that are inline?
-        const hasInlineMarkup = Array.from(element.children).some(child =>
-          INLINE_TAGS.has(child.tagName)
-        );
-
-        textElements.push({
-          element,
-          originalText: text,
-          originalInnerHTML: element.innerHTML,
-          hasInlineMarkup,
-        });
-
-        if (this.debug) {
-          const hasLinks = element.querySelector('a') !== null;
-          if (hasLinks && !hasInlineMarkup) {
-            console.warn(`[LLM DEBUG] Element has <a> links but hasInlineMarkup=false!`, {
-              tag: element.tagName,
-              innerHTML: element.innerHTML.substring(0, 200),
-              childrenTags: Array.from(element.children).map(c => c.tagName),
-            });
-          }
-        }
-
-        processedElements.add(element);
-
-        // Safety limit
-        if (textElements.length >= 1000) {
-          console.warn('Hit maximum element limit in extractTextElements, stopping');
-          break;
-        }
-      }
-    } catch (error) {
-      console.error('Error in extractTextElements:', error);
-    }
-
-    return textElements;
-  }
+  // ─── Translation Pipeline ──────────────────────────────────────────────────
 
   async translateWithAnimations(textElements) {
-    // Group elements by proximity and semantic blocks
-    const textBlocks = this.groupIntoBlocks(textElements);
+    const textBlocks = TextExtraction.groupIntoBlocks(textElements);
     this.totalBlocks = textBlocks.length;
     this.completedBlocks = 0;
 
-    // Update state with total blocks
     this.updateTranslationState({
       isTranslating: true,
       status: 'translating',
@@ -605,15 +186,12 @@ class LineLocalizationMachine {
       completedBlocks: 0,
     });
 
-    // Apply animation speed settings
-    this.injectSpeedAdjustedCSS();
+    Animation.injectSpeedAdjustedCSS(this.translationSettings);
 
-    // Add visual indicator that translation is starting (if enabled)
     if (this.translationSettings.showProgress !== false) {
-      this.showTranslationProgress();
+      Animation.showTranslationProgress();
     }
 
-    // Process blocks in batches based on user setting (blocks per API request)
     const blocksPerRequest = this.translationSettings.blocksPerRequest || 15;
     let completedCount = 0;
 
@@ -634,10 +212,9 @@ class LineLocalizationMachine {
         `[LLM] Starting batch ${batchIndex}/${batches.length - 1}, ${batch.length} blocks`
       );
 
-      // Start animations for current batch
       batch.forEach(block => {
         try {
-          this.animateBlockStart(block);
+          Animation.animateBlockStart(block);
         } catch (error) {
           console.warn('Error starting animation for block:', error);
         }
@@ -647,12 +224,10 @@ class LineLocalizationMachine {
       let translationResult;
       try {
         if (batchIndex === 0 || !nextBatchPromise) {
-          // First batch or no pending promise: start fresh request
           console.log(`[LLM] Batch ${batchIndex}: Starting fresh translation request`);
           const result = await this.translateMultipleBlocks(batch);
           translationResult = { success: true, result };
         } else {
-          // Use the already-started request from previous iteration
           console.log(`[LLM] Batch ${batchIndex}: Awaiting pending translation request`);
           const result = await nextBatchPromise;
           translationResult = { success: true, result };
@@ -662,9 +237,7 @@ class LineLocalizationMachine {
         );
       } catch (error) {
         console.error(`[LLM] Batch ${batchIndex}: Translation error:`, error);
-        if (error.isFatalError) {
-          throw error;
-        }
+        if (error.isFatalError) throw error;
         translationResult = { success: false, error };
       }
 
@@ -682,25 +255,37 @@ class LineLocalizationMachine {
         if (translationResult.success) {
           const batchTranslations = translationResult.result;
 
-          // Animate translation reveal for each block
           for (let j = 0; j < batch.length; j++) {
             const block = batch[j];
             const blockTranslations = batchTranslations[j] || block.map(item => item.originalText);
 
             try {
-              await this.animateTranslation(block, blockTranslations);
+              // animateTranslation stores { originalHTML, translatedHTML } per element
+              for (let k = 0; k < block.length; k++) {
+                const item = block[k];
+                const segments = blockTranslations[k] || item.textNodes.map(n => n.textContent);
+
+                const htmlPair = await Animation.animateLineTransition(
+                  item,
+                  segments,
+                  this.translationSettings,
+                  this.debug
+                );
+                this.translatedElements.set(item.element, htmlPair);
+              }
             } catch (animationError) {
               console.warn('Error animating block translation:', animationError);
             }
 
-            // Update progress
             completedCount++;
             this.completedBlocks = completedCount;
             if (this.translationSettings.showProgress !== false) {
-              this.updateTranslationProgress(completedCount, textBlocks.length);
+              Animation.updateTranslationProgress(
+                completedCount,
+                textBlocks.length,
+                this.translationSettings
+              );
             }
-
-            // Update persistent state
             this.updateTranslationState({
               isTranslating: true,
               status: 'translating',
@@ -710,17 +295,10 @@ class LineLocalizationMachine {
             });
           }
         } else {
-          // Handle translation error
           console.warn('Batch translation failed:', translationResult.error);
 
-          // Check if this is a fatal client error that should stop the entire translation
           if (translationResult.error && translationResult.error.isFatalError) {
-            console.error(
-              'Fatal error encountered, stopping entire translation:',
-              translationResult.error
-            );
-
-            // Update state to show error and stop translation
+            console.error('Fatal error, stopping translation:', translationResult.error);
             this.updateTranslationState({
               isTranslating: false,
               status: 'error',
@@ -730,296 +308,57 @@ class LineLocalizationMachine {
               totalBlocks: textBlocks.length,
               completedBlocks: completedCount,
             });
-
-            // Mark as not translating and cleanup
             this.isTranslating = false;
             if (this.translationSettings.showProgress !== false) {
-              this.hideTranslationProgress();
+              Animation.hideTranslationProgress(this.translationSettings);
             }
-
             throw translationResult.error;
           }
 
-          // For non-fatal errors, continue with error animation
-          batch.forEach(block => {
-            this.animateBlockError(block);
-            completedCount++;
-            this.completedBlocks = completedCount;
-            this.updateTranslationProgress(completedCount, textBlocks.length);
-
-            this.updateTranslationState({
-              isTranslating: true,
-              status: 'translating',
-              progress: Math.round((completedCount / textBlocks.length) * 100),
-              totalBlocks: textBlocks.length,
-              completedBlocks: completedCount,
-            });
-          });
+          // Non-fatal: show error animation and continue
+          this.handleBatchError(batch, completedCount, textBlocks.length);
+          completedCount += batch.length;
+          this.completedBlocks = completedCount;
         }
       } catch (error) {
-        if (error.isFatalError) {
-          console.error('Fatal error in translation loop, stopping:', error);
-          throw error;
-        }
-
+        if (error.isFatalError) throw error;
         console.warn('Unexpected batch error:', error);
-        batch.forEach(block => {
-          this.animateBlockError(block);
-          completedCount++;
-          this.completedBlocks = completedCount;
-          this.updateTranslationProgress(completedCount, textBlocks.length);
-
-          this.updateTranslationState({
-            isTranslating: true,
-            status: 'translating',
-            progress: Math.round((completedCount / textBlocks.length) * 100),
-            totalBlocks: textBlocks.length,
-            completedBlocks: completedCount,
-          });
-        });
+        this.handleBatchError(batch, completedCount, textBlocks.length);
+        completedCount += batch.length;
+        this.completedBlocks = completedCount;
       }
     }
 
-    // Remove progress indicator and add toggle button
     if (this.translationSettings.showProgress !== false) {
-      this.hideTranslationProgress();
+      Animation.hideTranslationProgress(this.translationSettings);
     }
-    this.addGlobalToggleButton();
+    Animation.addGlobalToggleButton(this.translatedElements, this.translationSettings);
   }
 
-  groupIntoBlocks(textElements) {
-    const blocks = [];
-    let currentBlock = [];
-
-    for (let i = 0; i < textElements.length; i++) {
-      const element = textElements[i];
-      const nextElement = textElements[i + 1];
-
-      // Start new block for headings, major elements, or after significant gaps
-      if (this.isBlockBoundary(element, nextElement) && currentBlock.length > 0) {
-        blocks.push([...currentBlock]);
-        currentBlock = [];
-      }
-
-      currentBlock.push(element);
-
-      // Limit block size to avoid overwhelming the API, but allow related content to stay together
-      if (currentBlock.length >= 3) {
-        // Check if next element is closely related (same parent or similar structure)
-        if (!nextElement || !this.areElementsRelated(element, nextElement)) {
-          blocks.push([...currentBlock]);
-          currentBlock = [];
-        }
-      }
-
-      // Hard limit to prevent blocks from becoming too large
-      if (currentBlock.length >= 5) {
-        blocks.push([...currentBlock]);
-        currentBlock = [];
-      }
-    }
-
-    if (currentBlock.length > 0) {
-      blocks.push(currentBlock);
-    }
-
-    return blocks;
-  }
-
-  isBlockBoundary(element, nextElement) {
-    const tagName = element.element.tagName.toLowerCase();
-
-    // Strong boundaries - always start new block
-    if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'article', 'section'].includes(tagName)) {
-      return true;
-    }
-
-    // Check if we're moving to a different structural element
-    if (nextElement) {
-      const nextTagName = nextElement.element.tagName.toLowerCase();
-      if (tagName !== nextTagName && ['p', 'div', 'li', 'blockquote'].includes(nextTagName)) {
-        return true;
-      }
-
-      // Check if elements are in different containers
-      if (element.element.parentElement !== nextElement.element.parentElement) {
-        const elementDepth = this.getElementDepth(element.element);
-        const nextElementDepth = this.getElementDepth(nextElement.element);
-        // If depth difference is significant, create boundary
-        if (Math.abs(elementDepth - nextElementDepth) > 2) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  areElementsRelated(element1, element2) {
-    // Check if elements are related and should stay in the same block
-    const parent1 = element1.element.parentElement;
-    const parent2 = element2.element.parentElement;
-
-    // Same parent = closely related
-    if (parent1 === parent2) {
-      return true;
-    }
-
-    // Check if they're in the same list, table, or similar structure
-    const container1 = element1.element.closest('ul, ol, table, blockquote, .content, .post');
-    const container2 = element2.element.closest('ul, ol, table, blockquote, .content, .post');
-
-    return container1 && container1 === container2;
-  }
-
-  getElementDepth(element) {
-    let depth = 0;
-    let current = element;
-    while (current && current !== document.body) {
-      depth++;
-      current = current.parentElement;
-    }
-    return depth;
-  }
-
-  showTranslationProgress() {
-    const progressBar = document.createElement('div');
-    progressBar.id = 'llm-progress-bar';
-    progressBar.innerHTML = `
-      <div class="llm-progress-inner">
-        <div class="llm-progress-label">Translating</div>
-        <div class="llm-progress-text">Analyzing content...</div>
-        <div class="llm-progress-track">
-          <div class="llm-progress-fill" style="width: 0%"></div>
-        </div>
-      </div>
-    `;
-
-    // Add styles
-    const style = document.createElement('style');
-    style.setAttribute('data-llm-progress', '');
-    style.textContent = `
-      #llm-progress-bar {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 10000;
-        background: #fffffe;
-        border: 1px solid #e0ded7;
-        padding: 14px 16px;
-        border-radius: 4px;
-        color: #2d2a25;
-        font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
-        animation: llmSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        min-width: 220px;
-      }
-
-      @keyframes llmSlideIn {
-        from { transform: translateY(-8px); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
-      }
-
-      .llm-progress-label {
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        color: #d97706;
-        margin-bottom: 4px;
-      }
-
-      .llm-progress-text {
-        font-size: 11px;
-        font-weight: 400;
-        color: #8a857a;
-        margin-bottom: 10px;
-        line-height: 1.3;
-      }
-
-      .llm-progress-track {
-        width: 100%;
-        height: 3px;
-        background: #efeee9;
-        border-radius: 1px;
-        overflow: hidden;
-      }
-
-      .llm-progress-fill {
-        height: 100%;
-        background: #2d2a25;
-        transition: width 0.3s ease;
-        border-radius: 1px;
-      }
-    `;
-
-    document.head.appendChild(style);
-    document.body.appendChild(progressBar);
-  }
-
-  updateTranslationProgress(current, total) {
-    const progressBar = document.getElementById('llm-progress-bar');
-    if (progressBar) {
-      const percentage = Math.round((current / total) * 100);
-      const fill = progressBar.querySelector('.llm-progress-fill');
-      const text = progressBar.querySelector('.llm-progress-text');
-
-      fill.style.width = `${percentage}%`;
-      const blocksPerRequest = this.translationSettings?.blocksPerRequest || 5;
-      text.textContent = `${current}/${total} blocks \u00b7 ${blocksPerRequest}/batch \u00b7 ${percentage}%`;
-    }
-  }
-
-  hideTranslationProgress() {
-    setTimeout(() => {
-      const progressBar = document.getElementById('llm-progress-bar');
-      const style = document.querySelector('style[data-llm-progress]');
-
-      if (progressBar) {
-        const animationDuration = this.getAdjustedTiming(300);
-        progressBar.style.animation = `llmSlideIn ${animationDuration}ms ease reverse`;
-        setTimeout(() => progressBar.remove(), animationDuration);
-      }
-
-      if (style) style.remove();
-    }, this.getAdjustedTiming(1000));
-  }
-
-  animateBlockStart(block) {
-    block.forEach(item => {
-      const element = item.element;
-      element.classList.add('llm-preparing');
-
-      // Store original content
-      this.originalContent.set(element, item.originalText);
+  handleBatchError(batch, completedCount, totalBlocks) {
+    batch.forEach(block => {
+      Animation.animateBlockError(block);
+      completedCount++;
+      this.completedBlocks = completedCount;
+      Animation.updateTranslationProgress(completedCount, totalBlocks, this.translationSettings);
+      this.updateTranslationState({
+        isTranslating: true,
+        status: 'translating',
+        progress: Math.round((completedCount / totalBlocks) * 100),
+        totalBlocks,
+        completedBlocks: completedCount,
+      });
     });
   }
 
-  animateBlockError(block) {
-    block.forEach(item => {
-      const element = item.element;
-      element.classList.remove('llm-preparing');
-      element.classList.add('llm-error');
-    });
-  }
+  // ─── API Communication ─────────────────────────────────────────────────────
 
   async translateMultipleBlocks(blocks) {
-    // Per-item placeholder maps (parallel structure to blocks)
-    const placeholderMaps = blocks.map(block =>
-      block.map(item => {
-        if (item.hasInlineMarkup) {
-          return this.serializeForTranslation(item.element);
-        }
-        return { text: item.originalText, placeholderMap: null };
-      })
-    );
-
-    // Build JSON structure for translation
     const translationData = {
       targetLanguage: this.getLanguageName(this.translationSettings.targetLanguage),
       blocks: blocks.map((block, blockIndex) => ({
         id: blockIndex,
-        items: placeholderMaps[blockIndex].map(s => s.text),
+        items: block.map(item => item.textNodes.map(node => node.textContent)),
       })),
     };
 
@@ -1031,23 +370,12 @@ class LineLocalizationMachine {
     }
 
     try {
-      // Call translation API with JSON data
       const result = await this.callTranslationAPI(translationData);
 
-      if (this.debug) {
-        console.log('Translation result:', {
-          success: result.success,
-          blockCount: result.blocks?.length,
-          expectedBlocks: blocks.length,
-        });
-      }
-
-      // Validate response structure
       if (!result.success || !result.blocks) {
         throw new Error(result.error || 'Translation failed - no blocks returned');
       }
 
-      // Process each translated block — deserialize placeholders back to HTML
       const results = [];
       for (let i = 0; i < blocks.length; i++) {
         const originalBlock = blocks[i];
@@ -1055,74 +383,36 @@ class LineLocalizationMachine {
 
         if (!translatedBlock || !translatedBlock.items) {
           console.warn(`Missing translation for block ${i}, using original`);
-          results.push(originalBlock.map(item => item.originalText));
+          results.push(originalBlock.map(item => item.textNodes.map(n => n.textContent)));
           continue;
         }
 
-        let translatedItems = translatedBlock.items.map((translatedText, itemIndex) => {
-          try {
-            const pMap = placeholderMaps[i][itemIndex]?.placeholderMap;
+        let translatedItems = translatedBlock.items;
 
-            if (this.debug) {
-              console.log(`[LLM DEBUG] block ${i}, item ${itemIndex}:`, {
-                rawFromAPI:
-                  typeof translatedText === 'string'
-                    ? translatedText.substring(0, 200)
-                    : translatedText,
-                hasMap: !!pMap,
-                mapKeys: pMap ? Object.keys(pMap) : null,
-                hasInlineMarkup: blocks[i][itemIndex]?.hasInlineMarkup,
-              });
-            }
-
-            const deserialized = this.deserializeFromTranslation(translatedText, pMap);
-
-            if (this.debug) {
-              const hasMarkers = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/.test(deserialized);
-              if (hasMarkers) {
-                console.warn(
-                  `[LLM DEBUG] MARKERS SURVIVED deserialization! block ${i}, item ${itemIndex}:`,
-                  deserialized.substring(0, 200)
-                );
-              }
-            }
-
-            return deserialized;
-          } catch (error) {
-            console.warn(`Error deserializing block ${i}, item ${itemIndex}:`, error);
-            return this.stripMarkers(translatedText);
+        // Pad or trim items to match block size
+        if (translatedItems.length < originalBlock.length) {
+          while (translatedItems.length < originalBlock.length) {
+            const fallbackItem = originalBlock[translatedItems.length];
+            translatedItems.push(fallbackItem.textNodes.map(n => n.textContent));
           }
-        });
-
-        // Handle item count mismatch
-        if (translatedItems.length !== originalBlock.length) {
-          console.warn(
-            `Item count mismatch in block ${i}: expected ${originalBlock.length}, got ${translatedItems.length}`
-          );
-
-          if (translatedItems.length < originalBlock.length) {
-            while (translatedItems.length < originalBlock.length) {
-              translatedItems.push(originalBlock[translatedItems.length].originalText);
-            }
-          } else {
-            translatedItems = translatedItems.slice(0, originalBlock.length);
-          }
+        } else if (translatedItems.length > originalBlock.length) {
+          translatedItems = translatedItems.slice(0, originalBlock.length);
         }
+
+        // Coerce each item to an array of strings
+        translatedItems = translatedItems.map(segments => {
+          if (!Array.isArray(segments)) return [String(segments ?? '')];
+          return segments.map(s => String(s ?? ''));
+        });
 
         results.push(translatedItems);
       }
 
       return results;
     } catch (error) {
+      if (error.isFatalError) throw error;
       console.error('Batch translation error:', error);
-
-      if (error.isFatalError) {
-        console.error('Fatal error in translateMultipleBlocks, re-throwing:', error);
-        throw error;
-      }
-
-      // For non-fatal errors, fallback: return original texts for all blocks
-      return blocks.map(block => block.map(item => item.originalText));
+      return blocks.map(block => block.map(item => item.textNodes.map(n => n.textContent)));
     }
   }
 
@@ -1148,7 +438,6 @@ class LineLocalizationMachine {
   }
 
   async callTranslationAPI(translationData) {
-    // translationData = { targetLanguage, blocks: [{id, items}, ...] }
     if (!translationData || !translationData.blocks || translationData.blocks.length === 0) {
       return { success: false, error: 'No translation data provided' };
     }
@@ -1163,31 +452,20 @@ class LineLocalizationMachine {
         });
       }
 
-      // Use background script for API calls (it has the centralized API client)
       const result = await chrome.runtime.sendMessage({
         action: 'TRANSLATE_REQUEST',
-        translationData: translationData,
+        translationData,
         settings: this.translationSettings,
       });
 
       if (!result || !result.success) {
-        // Handle API errors from background script
         let errorMessage = 'Translation failed';
         if (result && result.error) {
-          if (typeof result.error === 'string') {
-            errorMessage = result.error;
-          } else if (result.error.toString) {
-            errorMessage = result.error.toString();
-          }
+          errorMessage = typeof result.error === 'string' ? result.error : result.error.toString();
         }
         const error = new Error(errorMessage);
-
-        if (result && result.errorType) {
-          error.errorType = result.errorType;
-        }
-        if (result && result.errorStatus) {
-          error.status = result.errorStatus;
-        }
+        if (result && result.errorType) error.errorType = result.errorType;
+        if (result && result.errorStatus) error.status = result.errorStatus;
         if (
           result &&
           (result.isRetryable === false || (result.errorStatus >= 400 && result.errorStatus < 500))
@@ -1197,7 +475,6 @@ class LineLocalizationMachine {
         throw error;
       }
 
-      // Return the structured result with blocks
       return {
         success: true,
         blocks: result.blocks,
@@ -1206,368 +483,14 @@ class LineLocalizationMachine {
       };
     } catch (error) {
       console.error('Translation API call failed:', error);
-
-      // Re-throw API client errors as-is
-      if (error.isFatalError || error.errorType) {
-        throw error;
-      }
-
-      // Handle other errors
+      if (error.isFatalError || error.errorType) throw error;
       throw new Error(`Translation failed: ${error.message}`);
     }
   }
 
-  async animateTranslation(block, translatedTexts) {
-    for (let i = 0; i < block.length; i++) {
-      const item = block[i];
-      const translatedText = translatedTexts[i] || item.originalText;
-
-      await this.animateLineTransition(item, translatedText);
-      // Minimal stagger - animation should be fast, LLM is the bottleneck
-    }
-  }
-
-  async animateLineTransition(item, translatedText) {
-    const element = item.element;
-
-    // Phase 1: Quick fade out
-    element.classList.remove('llm-preparing');
-    element.classList.add('llm-fading-out');
-
-    await this.delay(50);
-
-    // Phase 2: Store original text and update with translation
-    // Safety net: strip any markers that survived deserialization
-    const cleanText = this.stripMarkers(translatedText);
-
-    if (this.debug) {
-      const markersInRaw = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/.test(translatedText);
-      const markersInClean = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/.test(cleanText);
-      console.log(`[LLM DEBUG] animateLineTransition:`, {
-        tag: element.tagName,
-        hasInlineMarkup: item.hasInlineMarkup,
-        markersInRaw,
-        markersInClean,
-        rawText: translatedText.substring(0, 150),
-        cleanText: cleanText.substring(0, 150),
-        originalInnerHTML: (item.originalInnerHTML || '').substring(0, 150),
-      });
-      if (markersInClean) {
-        console.error(
-          `[LLM DEBUG] MARKERS SURVIVED stripMarkers! This should never happen.`,
-          cleanText
-        );
-      }
-    }
-
-    element.setAttribute('data-llm-original', item.originalText);
-    element.setAttribute('data-llm-translated', cleanText);
-    element.setAttribute('data-llm-state', 'translated');
-    element.setAttribute('data-llm-original-html', item.originalInnerHTML || element.innerHTML);
-
-    // Mark whether this element has inline markup (for toggle button logic)
-    if (item.hasInlineMarkup) {
-      element.setAttribute('data-llm-has-markup', 'true');
-    }
-
-    try {
-      if (item.hasInlineMarkup) {
-        // Translation contains restored HTML — sanitize then set innerHTML
-        element.innerHTML = this.sanitizeHTML(cleanText);
-      } else {
-        // Plain text — use textContent for safety
-        element.textContent = cleanText;
-      }
-    } catch (error) {
-      console.warn('Text replacement error, using fallback:', error);
-      element.textContent = cleanText;
-    }
-
-    // Phase 3: Quick fade in with translation animation
-    element.classList.remove('llm-fading-out');
-    element.classList.add('llm-translated');
-
-    await this.delay(60); // Reduced from 200ms
-
-    // Phase 4: Settle
-    element.classList.add('llm-settled');
-  }
-
-  addGlobalToggleButton() {
-    // Check if button already exists
-    if (document.getElementById('llm-original-toggle')) {
-      return;
-    }
-
-    // Wait a bit to ensure progress bar is gone before showing toggle
-    setTimeout(() => {
-      this.createToggleButton();
-    }, this.getAdjustedTiming(1500));
-  }
-
-  createToggleButton() {
-    const toggleButton = document.createElement('div');
-    toggleButton.id = 'llm-original-toggle';
-    toggleButton.innerHTML = `
-      <div class="llm-toggle-container">
-        <button class="llm-toggle-btn" title="Toggle between translated and original text">
-          <svg class="toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 0 1 6.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span class="toggle-text">Show Originals</span>
-        </button>
-      </div>
-    `;
-
-    // Add styles for the toggle button
-    const style = document.createElement('style');
-    style.textContent = `
-      #llm-original-toggle {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 9999;
-        font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
-        animation: llmSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      }
-
-      @keyframes llmSlideIn {
-        from { transform: translateY(-8px); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
-      }
-
-      .llm-toggle-container {
-        background: #fffffe;
-        border: 1px solid #e0ded7;
-        border-radius: 4px;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
-      }
-
-      .llm-toggle-btn {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 14px;
-        background: none;
-        border: none;
-        color: #2d2a25;
-        font-family: inherit;
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        border-radius: 4px;
-      }
-
-      .llm-toggle-btn:hover {
-        background: #f7f6f3;
-        color: #d97706;
-      }
-
-      .llm-toggle-btn.active {
-        background: #2d2a25;
-        color: #faf9f7;
-      }
-
-      .llm-toggle-btn.active:hover {
-        background: #1a1816;
-      }
-
-      .toggle-icon {
-        transition: transform 0.2s ease;
-      }
-
-      .llm-toggle-btn.active .toggle-icon {
-        transform: rotate(180deg);
-      }
-    `;
-
-    document.head.appendChild(style);
-    document.body.appendChild(toggleButton);
-
-    // Add click handler for global toggle
-    const button = toggleButton.querySelector('.llm-toggle-btn');
-    let globalShowingOriginals = false;
-
-    button.addEventListener('click', () => {
-      globalShowingOriginals = !globalShowingOriginals;
-
-      // Update button appearance
-      button.classList.toggle('active', globalShowingOriginals);
-      button.querySelector('.toggle-text').textContent = globalShowingOriginals
-        ? 'Show Translations'
-        : 'Show Originals';
-
-      // Toggle all translated elements
-      const translatedElements = document.querySelectorAll(
-        '[data-llm-state="translated"], [data-llm-state="showing-original"]'
-      );
-
-      translatedElements.forEach(element => {
-        const hasMarkup = element.getAttribute('data-llm-has-markup') === 'true';
-
-        if (globalShowingOriginals) {
-          // Show original — always restore original innerHTML to preserve formatting
-          const originalHTML = element.getAttribute('data-llm-original-html');
-          if (originalHTML) {
-            element.innerHTML = originalHTML;
-          } else {
-            element.textContent = element.getAttribute('data-llm-original') || '';
-          }
-          element.setAttribute('data-llm-state', 'showing-original');
-          element.classList.add('llm-showing-original');
-        } else {
-          // Show translated text
-          const translatedText = element.getAttribute('data-llm-translated');
-          if (translatedText) {
-            const cleanText = this.stripMarkers(translatedText);
-            if (hasMarkup) {
-              element.innerHTML = this.sanitizeHTML(cleanText);
-            } else {
-              element.textContent = cleanText;
-            }
-            element.setAttribute('data-llm-state', 'translated');
-            element.classList.remove('llm-showing-original');
-          }
-        }
-      });
-    });
-  }
-
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, this.getAdjustedTiming(ms)));
-  }
-
-  // Animation speed system
-  getSpeedMultiplier() {
-    const speed = this.translationSettings?.animationSpeed || 'normal';
-    switch (speed) {
-      case 'slow':
-        return 1.5; // 1.5x slower
-      case 'fast':
-        return 0.6; // 0.6x faster
-      case 'normal':
-      default:
-        return 1.0; // normal speed
-    }
-  }
-
-  getAdjustedTiming(baseMs) {
-    return Math.round(baseMs * this.getSpeedMultiplier());
-  }
-
-  injectSpeedAdjustedCSS() {
-    // Remove any existing speed-adjusted CSS
-    const existingStyle = document.getElementById('llm-speed-adjusted-styles');
-    if (existingStyle) {
-      existingStyle.remove();
-    }
-
-    const multiplier = this.getSpeedMultiplier();
-
-    // Only inject custom CSS if speed is not normal
-    if (multiplier === 1.0) return;
-
-    const css = `
-      .llm-preparing::after {
-        animation-duration: ${2.4 * multiplier}s !important;
-      }
-      .llm-fading-out {
-        animation-duration: ${0.06 * multiplier}s !important;
-      }
-      .llm-translated {
-        animation-duration: ${0.18 * multiplier}s !important;
-      }
-      .llm-settled {
-        transition-duration: ${0.2 * multiplier}s !important;
-      }
-      .llm-error {
-        animation-duration: ${0.25 * multiplier}s !important;
-      }
-      .llm-block-loading::after {
-        animation-duration: ${0.8 * multiplier}s !important;
-      }
-      .llm-showing-original {
-        transition-duration: ${0.15 * multiplier}s !important;
-      }
-      #llm-progress-bar {
-        animation-duration: ${0.3 * multiplier}s !important;
-      }
-      .llm-progress-fill {
-        transition-duration: ${0.3 * multiplier}s !important;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .llm-preparing::after, .llm-fading-out, .llm-translated, .llm-error {
-          animation: none !important;
-        }
-        .llm-settled {
-          transition: none !important;
-        }
-      }
-    `;
-
-    const style = document.createElement('style');
-    style.id = 'llm-speed-adjusted-styles';
-    style.textContent = css;
-    document.head.appendChild(style);
-  }
-
-  playCompletionSound() {
-    try {
-      // Create a simple, pleasant completion sound using Web Audio API
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
-      // Create a short, gentle completion tone
-      const oscillator1 = audioContext.createOscillator();
-      const oscillator2 = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      // Two-tone chime effect
-      oscillator1.connect(gainNode);
-      oscillator2.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      // Set frequencies for a pleasant chord (C and G notes)
-      oscillator1.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5
-      oscillator2.frequency.setValueAtTime(783.99, audioContext.currentTime); // G5
-
-      // Set waveform for a soft sound
-      oscillator1.type = 'sine';
-      oscillator2.type = 'sine';
-
-      // Gentle fade in and out envelope
-      gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-      gainNode.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 0.05);
-      gainNode.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 0.2);
-      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.4);
-
-      // Play the sound
-      const startTime = audioContext.currentTime;
-      oscillator1.start(startTime);
-      oscillator2.start(startTime);
-      oscillator1.stop(startTime + 0.4);
-      oscillator2.stop(startTime + 0.4);
-    } catch (error) {
-      console.warn('Could not play completion sound:', error);
-      // Fallback: try using a simple beep if Web Audio API fails
-      try {
-        const audio = new window.Audio(
-          'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmUhCjuZz/LNeSMFLrHa7eGWQQsVX7Tp65VFEAg+s+ruy2Q9Cz8h'
-        );
-        audio.volume = 0.1;
-        audio.play().catch(() => {
-          // Silent fail if even the fallback doesn't work
-        });
-      } catch {
-        // Silent fail - user interaction may be required for audio
-      }
-    }
-  }
+  // ─── State Management ──────────────────────────────────────────────────────
 
   updateTranslationState(state) {
-    // Send state update to background script for persistence
     if (!this.tabId) {
       console.warn('No tab ID available for state update');
       return;
@@ -1581,12 +504,10 @@ class LineLocalizationMachine {
       .sendMessage({
         action: 'UPDATE_TRANSLATION_STATE',
         tabId: this.tabId,
-        state: state,
+        state,
       })
       .then(response => {
-        if (this.debug) {
-          console.log('Translation state update response:', response);
-        }
+        if (this.debug) console.log('Translation state update response:', response);
       })
       .catch(error => {
         console.error('Failed to update translation state:', error);
@@ -1594,12 +515,10 @@ class LineLocalizationMachine {
   }
 
   async getTranslationState() {
-    // Get current translation state from background script
     if (!this.tabId) {
       console.warn('No tab ID available for getting state');
       return null;
     }
-
     try {
       const response = await chrome.runtime.sendMessage({
         action: 'GET_TRANSLATION_STATE',
@@ -1613,12 +532,10 @@ class LineLocalizationMachine {
   }
 
   async clearTranslationState() {
-    // Clear translation state from background script
     if (!this.tabId) {
       console.warn('No tab ID available for clearing state');
       return;
     }
-
     try {
       await chrome.runtime.sendMessage({
         action: 'CLEAR_TRANSLATION_STATE',
@@ -1630,18 +547,14 @@ class LineLocalizationMachine {
   }
 
   clearPreviousTranslationState() {
-    // Remove any existing progress bar or error indicators from previous translations
     const existingProgress = document.getElementById('llm-progress-bar');
-    if (existingProgress) {
-      existingProgress.remove();
-    }
+    if (existingProgress) existingProgress.remove();
 
     const existingToggle = document.getElementById('llm-global-toggle');
-    if (existingToggle) {
-      existingToggle.remove();
-    }
+    if (existingToggle) existingToggle.remove();
 
-    // Clear any existing translation classes from elements
+    this.translatedElements.clear();
+
     document
       .querySelectorAll(
         '.llm-preparing, .llm-fading-out, .llm-translated, .llm-settled, .llm-error'

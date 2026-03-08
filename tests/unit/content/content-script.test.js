@@ -1,350 +1,140 @@
 /**
- * Unit tests for content-script.js pure functions:
- * - sanitizeHTML
- * - serializeForTranslation
- * - deserializeFromTranslation
- * - extractTextElements (block-level selector approach)
- * - findMainContent (scoring-based)
+ * Unit tests for content script modules:
+ * - TextExtraction: collectTextNodes, extractTextElements, identifyArticleContent
+ * - LineLocalizationMachine: orchestration class (content-script.js)
  */
-
-// The content script defines LineLocalizationMachine on global scope.
-// We load the source, strip the auto-init, and eval it so the class is available.
 
 const fs = require('fs');
 const path = require('path');
-const source = fs.readFileSync(
+
+// ─── Load text-extraction.js (exposes TextExtraction global) ─────────────────
+
+const textExtractionSource = fs.readFileSync(
+  path.resolve(__dirname, '../../../content/text-extraction.js'),
+  'utf8'
+);
+eval(textExtractionSource + '\nglobal.TextExtraction = TextExtraction;\n');
+
+// ─── Load content-script.js (exposes LineLocalizationMachine class) ──────────
+
+// Stub Animation global so content-script.js doesn't blow up
+global.Animation = {
+  getAdjustedTiming: ms => ms,
+  delay: ms => new Promise(resolve => setTimeout(resolve, ms)),
+  injectSpeedAdjustedCSS: () => {},
+  showTranslationProgress: () => {},
+  updateTranslationProgress: () => {},
+  hideTranslationProgress: () => {},
+  animateBlockStart: () => {},
+  animateBlockError: () => {},
+  animateTranslation: () => {},
+  animateLineTransition: () => ({ originalHTML: '', translatedHTML: '' }),
+  addGlobalToggleButton: () => {},
+  playCompletionSound: () => {},
+};
+
+const contentSource = fs.readFileSync(
   path.resolve(__dirname, '../../../content/content-script.js'),
   'utf8'
 );
-
-// Remove the final `new LineLocalizationMachine()` line so it doesn't auto-init,
-// and append an assignment to make the class available via `global`.
-const classOnly = source.replace(/^new LineLocalizationMachine\(\);?\s*$/m, '');
+const classOnly = contentSource.replace(/^new LineLocalizationMachine\(\);?\s*$/m, '');
 const wrappedSource = classOnly + '\nglobal.LineLocalizationMachine = LineLocalizationMachine;\n';
-
 eval(wrappedSource);
 
-// Helper: create an instance without triggering init/constructor side effects
-function createMachine() {
-  const machine = Object.create(global.LineLocalizationMachine.prototype);
-  machine.isTranslating = false;
-  machine.originalContent = new Map();
-  machine.translationSettings = null;
-  machine.animationQueue = [];
-  machine.translationHistory = [];
-  machine.totalBlocks = 0;
-  machine.completedBlocks = 0;
-  machine.tabId = null;
-  machine.debug = false;
-  return machine;
-}
+// ─── collectTextNodes ─────────────────────────────────────────────────────────
 
-// ─── sanitizeHTML ────────────────────────────────────────────────────────────
-
-describe('sanitizeHTML', () => {
-  let machine;
-  beforeEach(() => {
-    machine = createMachine();
-  });
-
-  test('passes through safe HTML unchanged', () => {
-    const html = '<strong>bold</strong> and <em>italic</em>';
-    expect(machine.sanitizeHTML(html)).toBe(html);
-  });
-
-  test('strips <script> tags', () => {
-    const html = 'hello <script>alert("xss")</script> world';
-    const result = machine.sanitizeHTML(html);
-    expect(result).not.toContain('<script');
-    expect(result).toContain('hello');
-    expect(result).toContain('world');
-  });
-
-  test('strips <iframe> tags', () => {
-    const html = 'text <iframe src="evil.com"></iframe> more';
-    const result = machine.sanitizeHTML(html);
-    expect(result).not.toContain('<iframe');
-  });
-
-  test('strips <object>, <embed>, <form> tags', () => {
-    const html = '<object data="x"></object><embed src="y"><form action="z">input</form>';
-    const result = machine.sanitizeHTML(html);
-    expect(result).not.toContain('<object');
-    expect(result).not.toContain('<embed');
-    expect(result).not.toContain('<form');
-  });
-
-  test('strips on* event handler attributes', () => {
-    const html = '<a href="#" onclick="alert(1)">click</a>';
-    const result = machine.sanitizeHTML(html);
-    expect(result).not.toContain('onclick');
-    expect(result).toContain('click</a>');
-  });
-
-  test('strips javascript: hrefs', () => {
-    const html = '<a href="javascript:alert(1)">link</a>';
-    const result = machine.sanitizeHTML(html);
-    expect(result).not.toContain('javascript:');
-  });
-
-  test('preserves safe inline elements', () => {
-    const html = '<code>foo</code> <kbd>bar</kbd> <abbr>baz</abbr>';
-    const result = machine.sanitizeHTML(html);
-    expect(result).toContain('<code>');
-    expect(result).toContain('<kbd>');
-    expect(result).toContain('<abbr>');
-  });
-
-  test('returns empty string for empty input', () => {
-    expect(machine.sanitizeHTML('')).toBe('');
-  });
-
-  test('returns plain text as-is', () => {
-    expect(machine.sanitizeHTML('no html here')).toBe('no html here');
-  });
-});
-
-// ─── serializeForTranslation ─────────────────────────────────────────────────
-
-describe('serializeForTranslation', () => {
-  let machine;
-  beforeEach(() => {
-    machine = createMachine();
-  });
-
-  test('plain text element returns text with no placeholderMap', () => {
+describe('collectTextNodes', () => {
+  test('collects single text node from plain element', () => {
     const el = document.createElement('p');
     el.textContent = 'Hello world';
-    const result = machine.serializeForTranslation(el);
-    expect(result.text).toBe('Hello world');
-    expect(result.placeholderMap).toBeNull();
+    const nodes = TextExtraction.collectTextNodes(el);
+    expect(nodes.length).toBe(1);
+    expect(nodes[0].textContent).toBe('Hello world');
   });
 
-  test('element with <strong> gets translatable marker', () => {
+  test('collects text nodes from element with inline markup', () => {
     const el = document.createElement('p');
-    el.innerHTML = 'Click <strong>here</strong> now';
-    const result = machine.serializeForTranslation(el);
-    expect(result.text).toMatch(/\[T:1\]here\[\/T:1\]/);
-    expect(result.text).toContain('Click ');
-    expect(result.text).toContain(' now');
-    expect(result.placeholderMap).not.toBeNull();
-    expect(result.placeholderMap['1'].tag).toBe('STRONG');
+    el.innerHTML = 'Click <strong>here</strong> to continue';
+    const nodes = TextExtraction.collectTextNodes(el);
+    expect(nodes.length).toBe(3);
+    expect(nodes[0].textContent).toBe('Click ');
+    expect(nodes[1].textContent).toBe('here');
+    expect(nodes[2].textContent).toBe(' to continue');
   });
 
-  test('element with <code> gets opaque marker', () => {
-    const el = document.createElement('p');
-    el.innerHTML = 'Run <code>uv run</code> to start';
-    const result = machine.serializeForTranslation(el);
-    expect(result.text).toMatch(/\[O:1\]/);
-    expect(result.text).not.toContain('<code>');
-    expect(result.placeholderMap['1'].outerHTML).toContain('<code>');
-  });
-
-  test('element with <a> link gets translatable marker', () => {
-    const el = document.createElement('p');
-    el.innerHTML = 'See <a href="https://example.com">this page</a> for details';
-    const result = machine.serializeForTranslation(el);
-    expect(result.text).toMatch(/\[T:1\]this page\[\/T:1\]/);
-    expect(result.placeholderMap['1'].tag).toBe('A');
-    expect(result.placeholderMap['1'].attrs).toContain('href="https://example.com"');
-  });
-
-  test('nested <a><strong>text</strong></a> produces nested markers', () => {
+  test('collects text nodes from nested inline elements', () => {
     const el = document.createElement('p');
     el.innerHTML = 'Go to <a href="#"><strong>bold link</strong></a> now';
-    const result = machine.serializeForTranslation(el);
-    // Should have two markers, one nested inside the other
-    expect(result.text).toMatch(/\[T:\d+\]\[T:\d+\]bold link\[\/T:\d+\]\[\/T:\d+\]/);
+    const nodes = TextExtraction.collectTextNodes(el);
+    expect(nodes.length).toBe(3);
+    expect(nodes[0].textContent).toBe('Go to ');
+    expect(nodes[1].textContent).toBe('bold link');
+    expect(nodes[2].textContent).toBe(' now');
   });
 
-  test('<br> gets opaque marker', () => {
+  test('skips text inside CODE elements', () => {
     const el = document.createElement('p');
-    el.innerHTML = 'line one<br>line two';
-    const result = machine.serializeForTranslation(el);
-    expect(result.text).toMatch(/\[O:\d+\]/);
-    expect(result.placeholderMap).not.toBeNull();
+    el.innerHTML = 'Run <code>uv run</code> to start';
+    const nodes = TextExtraction.collectTextNodes(el);
+    expect(nodes.length).toBe(2);
+    expect(nodes[0].textContent).toBe('Run ');
+    expect(nodes[1].textContent).toBe(' to start');
   });
 
-  test('multiple inline elements get unique markers', () => {
+  test('skips text inside KBD, SAMP, ABBR, SUB, SUP, VAR, TIME', () => {
     const el = document.createElement('p');
-    el.innerHTML = '<em>one</em> and <strong>two</strong> and <code>three</code>';
-    const result = machine.serializeForTranslation(el);
-    expect(result.text).toMatch(/\[T:1\]/);
-    expect(result.text).toMatch(/\[T:2\]/);
-    expect(result.text).toMatch(/\[O:3\]/);
-  });
-});
-
-// ─── deserializeFromTranslation ──────────────────────────────────────────────
-
-describe('deserializeFromTranslation', () => {
-  let machine;
-  beforeEach(() => {
-    machine = createMachine();
+    el.innerHTML = 'Press <kbd>Ctrl+C</kbd> or use <var>x</var> for <abbr>HTML</abbr>';
+    const nodes = TextExtraction.collectTextNodes(el);
+    const texts = nodes.map(n => n.textContent.trim()).filter(t => t.length > 0);
+    expect(texts).not.toContain('Ctrl+C');
+    expect(texts).not.toContain('x');
+    expect(texts).not.toContain('HTML');
   });
 
-  test('returns clean text when map is null and no markers present', () => {
-    expect(machine.deserializeFromTranslation('hello world', null)).toBe('hello world');
-  });
-
-  test('strips cross-contaminated markers when map is null', () => {
-    // LLM can hallucinate markers into items that had no inline markup
-    const text = 'El equipo [T:1]comenzó[/T:1] con la regla [O:2]';
-    const result = machine.deserializeFromTranslation(text, null);
-    expect(result).not.toContain('[T:');
-    expect(result).not.toContain('[/T:');
-    expect(result).not.toContain('[O:');
-    expect(result).toContain('comenzó');
-  });
-
-  test('restores opaque marker [O:N]', () => {
-    const map = { 1: { type: 'opaque', outerHTML: '<code>uv run</code>' } };
-    const text = 'Ejecutar [O:1] para empezar';
-    const result = machine.deserializeFromTranslation(text, map);
-    expect(result).toBe('Ejecutar <code>uv run</code> para empezar');
-  });
-
-  test('restores translatable marker [T:N]...[/T:N]', () => {
-    const map = { 1: { type: 'translatable', tag: 'STRONG', attrs: '' } };
-    const text = 'Haz clic [T:1]aquí[/T:1] ahora';
-    const result = machine.deserializeFromTranslation(text, map);
-    expect(result).toBe('Haz clic <strong>aquí</strong> ahora');
-  });
-
-  test('restores translatable marker with attributes', () => {
-    const map = {
-      1: { type: 'translatable', tag: 'A', attrs: 'href="https://example.com" class="link"' },
-    };
-    const text = 'Ver [T:1]esta página[/T:1] para detalles';
-    const result = machine.deserializeFromTranslation(text, map);
-    expect(result).toBe(
-      'Ver <a href="https://example.com" class="link">esta página</a> para detalles'
-    );
-  });
-
-  test('restores nested markers inside-out', () => {
-    const map = {
-      1: { type: 'translatable', tag: 'A', attrs: 'href="#"' },
-      2: { type: 'translatable', tag: 'STRONG', attrs: '' },
-    };
-    const text = 'Ir a [T:1][T:2]enlace negrita[/T:2][/T:1] ahora';
-    const result = machine.deserializeFromTranslation(text, map);
-    expect(result).toBe('Ir a <a href="#">\u003cstrong>enlace negrita</strong></a> ahora');
-  });
-
-  test('strips orphaned paired markers (LLM corruption)', () => {
-    const map = { 1: { type: 'opaque', outerHTML: '<br>' } };
-    const text = 'some [T:99]orphaned[/T:99] text [O:1] and [O:55] leftover';
-    const result = machine.deserializeFromTranslation(text, map);
-    // [O:1] should be restored, [T:99] and [O:55] should be cleaned up
-    expect(result).toContain('<br>');
-    expect(result).not.toContain('[T:99]');
-    expect(result).not.toContain('[/T:99]');
-    expect(result).not.toContain('[O:55]');
-    expect(result).toContain('orphaned');
-  });
-
-  test('strips orphaned opening tags when LLM drops closing tag', () => {
-    const map = { 1: { type: 'translatable', tag: 'STRONG', attrs: '' } };
-    // LLM returned opening [T:1] but dropped the closing [/T:1]
-    const text = 'texto [T:1]negrita sin cierre y más texto';
-    const result = machine.deserializeFromTranslation(text, map);
-    expect(result).not.toContain('[T:1]');
-    expect(result).toContain('negrita sin cierre');
-  });
-
-  test('strips all marker types when LLM corrupts output', () => {
-    const map = {};
-    const text = 'clean [T:5]this [O:3] and [/T:7] up';
-    const result = machine.deserializeFromTranslation(text, map);
-    expect(result).not.toContain('[T:');
-    expect(result).not.toContain('[/T:');
-    expect(result).not.toContain('[O:');
-    expect(result).toBe('clean this  and  up');
-  });
-
-  test('round-trip: serialize then deserialize produces valid HTML', () => {
+  test('collects text from A, STRONG, EM, B, I, MARK, SPAN', () => {
     const el = document.createElement('p');
-    el.innerHTML = 'Click <strong>here</strong> and <a href="#">there</a>';
-    const serialized = machine.serializeForTranslation(el);
-    // Simulate translation that preserves markers
-    const translated = serialized.text
-      .replace('Click ', 'Haz clic ')
-      .replace('here', 'aquí')
-      .replace(' and ', ' y ')
-      .replace('there', 'allí');
-    const result = machine.deserializeFromTranslation(translated, serialized.placeholderMap);
-    expect(result).toContain('<strong>aquí</strong>');
-    expect(result).toContain('<a href="#">allí</a>');
-    expect(result).toContain('Haz clic ');
-  });
-});
-
-// ─── stripMarkers ────────────────────────────────────────────────────────────
-
-describe('stripMarkers', () => {
-  let machine;
-  beforeEach(() => {
-    machine = createMachine();
+    el.innerHTML =
+      '<a href="#">link</a> <strong>bold</strong> <em>italic</em> ' +
+      '<b>b</b> <i>i</i> <mark>mark</mark> <span>span</span>';
+    const nodes = TextExtraction.collectTextNodes(el);
+    const texts = nodes.map(n => n.textContent);
+    expect(texts).toContain('link');
+    expect(texts).toContain('bold');
+    expect(texts).toContain('italic');
+    expect(texts).toContain('mark');
+    expect(texts).toContain('span');
   });
 
-  test('strips all marker types from text', () => {
-    const text = 'hello [T:1]world[/T:1] foo [O:2] bar';
-    expect(machine.stripMarkers(text)).toBe('hello world foo  bar');
+  test('skips whitespace-only text nodes', () => {
+    const el = document.createElement('p');
+    el.innerHTML = '  <strong>bold</strong>  ';
+    const nodes = TextExtraction.collectTextNodes(el);
+    expect(nodes.length).toBe(1);
+    expect(nodes[0].textContent).toBe('bold');
   });
 
-  test('returns empty string for null/undefined', () => {
-    expect(machine.stripMarkers(null)).toBe('');
-    expect(machine.stripMarkers(undefined)).toBe('');
+  test('returns empty array for element with no text', () => {
+    const el = document.createElement('p');
+    el.innerHTML = '<img src="test.png"><br>';
+    const nodes = TextExtraction.collectTextNodes(el);
+    expect(nodes.length).toBe(0);
   });
 
-  test('coerces non-string values to string', () => {
-    expect(machine.stripMarkers(42)).toBe('42');
-    expect(machine.stripMarkers(true)).toBe('true');
-  });
-
-  test('passes through clean text unchanged', () => {
-    expect(machine.stripMarkers('no markers here')).toBe('no markers here');
-  });
-});
-
-// ─── deserializeFromTranslation non-string handling ──────────────────────────
-
-describe('deserializeFromTranslation — non-string inputs', () => {
-  let machine;
-  beforeEach(() => {
-    machine = createMachine();
-  });
-
-  test('handles null input gracefully', () => {
-    const result = machine.deserializeFromTranslation(null, null);
-    expect(result).toBe('');
-  });
-
-  test('handles number input gracefully', () => {
-    const result = machine.deserializeFromTranslation(42, null);
-    expect(result).toBe('42');
-  });
-
-  test('strips markers from number-coerced string', () => {
-    // Edge case: would not normally happen, but verifies coercion path
-    const result = machine.deserializeFromTranslation('[T:1]hello[/T:1]', null);
-    expect(result).toBe('hello');
+  test('handles element with only opaque children', () => {
+    const el = document.createElement('p');
+    el.innerHTML = '<code>x</code><kbd>y</kbd>';
+    const nodes = TextExtraction.collectTextNodes(el);
+    expect(nodes.length).toBe(0);
   });
 });
 
 // ─── extractTextElements ─────────────────────────────────────────────────────
 
 describe('extractTextElements', () => {
-  let machine;
-  beforeEach(() => {
-    machine = createMachine();
-  });
-
   test('extracts <p> elements', () => {
     const container = document.createElement('div');
     container.innerHTML = '<p>This is a paragraph with enough text to be extracted.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(1);
     expect(elements[0].element.tagName).toBe('P');
   });
@@ -354,7 +144,7 @@ describe('extractTextElements', () => {
     container.innerHTML =
       '<h2>A heading with sufficient text length</h2>' +
       '<p>Paragraph text that is definitely long enough.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(2);
     expect(elements[0].element.tagName).toBe('H2');
   });
@@ -364,7 +154,7 @@ describe('extractTextElements', () => {
     container.innerHTML =
       '<p style="display:none">Hidden paragraph with enough text here.</p>' +
       '<p>Visible paragraph with enough text here too.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     // jsdom may not compute styles, so we check the visible one is found
     expect(elements.length).toBeGreaterThanOrEqual(1);
   });
@@ -374,7 +164,7 @@ describe('extractTextElements', () => {
     container.innerHTML =
       '<pre><code>some code that should not be translated</code></pre>' +
       '<p>Normal paragraph that should be extracted here.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     const tags = elements.map(e => e.element.tagName);
     expect(tags).not.toContain('CODE');
     expect(tags).toContain('P');
@@ -385,21 +175,21 @@ describe('extractTextElements', () => {
     container.innerHTML =
       '<p class="llm-no-translate">Skip this paragraph text entirely.</p>' +
       '<p>Translate this paragraph text instead.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(1);
     expect(elements[0].element.classList.contains('llm-no-translate')).toBe(false);
   });
 
-  test('detects hasInlineMarkup correctly', () => {
+  test('includes textNodes array in extracted elements', () => {
     const container = document.createElement('div');
     container.innerHTML =
       '<p>Plain text paragraph without any markup.</p>' +
       '<p>Paragraph with <strong>bold text</strong> in it.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     const plain = elements.find(e => e.originalText.includes('Plain'));
     const marked = elements.find(e => e.originalText.includes('bold'));
-    expect(plain.hasInlineMarkup).toBe(false);
-    expect(marked.hasInlineMarkup).toBe(true);
+    expect(plain.textNodes.length).toBe(1);
+    expect(marked.textNodes.length).toBe(3);
   });
 
   test('skips elements inside <nav>, <footer>, <aside>', () => {
@@ -409,7 +199,7 @@ describe('extractTextElements', () => {
       '<p>Main content paragraph that should be extracted.</p>' +
       '<footer><p>Footer paragraph that should not be extracted.</p></footer>' +
       '<aside><p>Sidebar paragraph that should not be extracted.</p></aside>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(1);
     expect(elements[0].originalText).toContain('Main content');
   });
@@ -421,7 +211,7 @@ describe('extractTextElements', () => {
       '<div class="comments"><p>User comment that should not be translated.</p></div>' +
       '<div class="related-posts"><p>Related article text that should be skipped.</p></div>' +
       '<p>Actual article content paragraph for translation.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(1);
     expect(elements[0].originalText).toContain('Actual article');
   });
@@ -432,7 +222,7 @@ describe('extractTextElements', () => {
       '<div role="navigation"><p>Navigation text that should be skipped.</p></div>' +
       '<div role="complementary"><p>Sidebar text that should be skipped.</p></div>' +
       '<p>Main article text that should be extracted here.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(1);
     expect(elements[0].originalText).toContain('Main article');
   });
@@ -440,8 +230,7 @@ describe('extractTextElements', () => {
   test('avoids duplicate extraction of <p> inside <li>', () => {
     const container = document.createElement('div');
     container.innerHTML = '<ul><li><p>List item paragraph with enough text.</p></li></ul>';
-    const elements = machine.extractTextElements(container);
-    // Should only extract the <p>, not both <li> and <p>
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(1);
     expect(elements[0].element.tagName).toBe('P');
   });
@@ -449,68 +238,64 @@ describe('extractTextElements', () => {
   test('skips short text elements', () => {
     const container = document.createElement('div');
     container.innerHTML = '<p>Hi</p><p>This is a long enough paragraph to extract.</p>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(1);
   });
 
   test('returns empty array for container with no block elements', () => {
     const container = document.createElement('div');
     container.innerHTML = '<span>x</span>';
-    const elements = machine.extractTextElements(container);
+    const elements = TextExtraction.extractTextElements(container);
     expect(elements.length).toBe(0);
   });
 });
 
-// ─── findMainContent ─────────────────────────────────────────────────────────
+// ─── identifyArticleContent ──────────────────────────────────────────────────
 
-describe('findMainContent', () => {
-  let machine;
-
-  beforeEach(() => {
-    machine = createMachine();
-    // Reset body
-    document.body.innerHTML = '';
+describe('identifyArticleContent', () => {
+  test('returns null when Readability is not loaded', () => {
+    const result = TextExtraction.identifyArticleContent();
+    expect(result).toBeNull();
   });
 
-  test('selects <article> over <nav>', () => {
-    // Need enough content to exceed MIN_SCORE (50 points) in the scoring algorithm
-    const paragraphs = Array.from(
-      { length: 10 },
-      (_, i) =>
-        `<p>This is paragraph ${i + 1} of the article with enough text to contribute to the scoring algorithm used by findMainContent.</p>`
-    ).join('\n');
-    document.body.innerHTML = `
-      <nav><ul><li>Home</li><li>About</li><li>Contact</li></ul></nav>
-      <article>
-        <h2>Article Heading</h2>
-        ${paragraphs}
-      </article>
-    `;
-    const result = machine.findMainContent();
-    expect(result.tagName).toBe('ARTICLE');
+  test('isArticleContent returns true when articleData is null (fallback mode)', () => {
+    const el = document.createElement('p');
+    el.textContent = 'This is some article content that should be accepted.';
+    expect(TextExtraction.isArticleContent(el, null)).toBe(true);
   });
 
-  test('selects <main> when present', () => {
-    const paragraphs = Array.from(
-      { length: 10 },
-      (_, i) =>
-        `<p>This is paragraph ${i + 1} of the main content area with sufficient text for scoring purposes.</p>`
-    ).join('\n');
-    document.body.innerHTML = `
-      <header><h1>Site Title</h1></header>
-      <main>
-        <h2>Main Section Heading</h2>
-        ${paragraphs}
-      </main>
-      <footer><p>Footer text</p></footer>
-    `;
-    const result = machine.findMainContent();
-    expect(result.tagName).toBe('MAIN');
+  test('isArticleContent matches exact paragraph text', () => {
+    const articleData = {
+      articleTexts: new Set(['This is the article paragraph content here.']),
+      fullArticleText: 'This is the article paragraph content here.',
+    };
+    const el = document.createElement('p');
+    el.textContent = 'This is the article paragraph content here.';
+    expect(TextExtraction.isArticleContent(el, articleData)).toBe(true);
   });
 
-  test('falls back to body when no semantic containers', () => {
-    document.body.innerHTML = '<div><p>Just a paragraph with some text content.</p></div>';
-    const result = machine.findMainContent();
-    expect(result.tagName).toBe('BODY');
+  test('isArticleContent rejects text not in article', () => {
+    const articleData = {
+      articleTexts: new Set(['Article content that should be translated.']),
+      fullArticleText: 'Article content that should be translated.',
+    };
+    const el = document.createElement('p');
+    el.textContent = 'Navigation menu text that should not be translated.';
+    expect(TextExtraction.isArticleContent(el, articleData)).toBe(false);
+  });
+
+  test('isArticleContent uses substring match for orphan text', () => {
+    const articleData = {
+      articleTexts: new Set(),
+      fullArticleText: 'Here is a long article with some orphan text floating in the middle of it.',
+    };
+    const el = document.createElement('span');
+    el.textContent = 'some orphan text floating in the middle';
+    expect(TextExtraction.isArticleContent(el, articleData)).toBe(true);
+  });
+
+  test('normalizeWhitespace collapses whitespace', () => {
+    expect(TextExtraction.normalizeWhitespace('  hello   world  ')).toBe('hello world');
+    expect(TextExtraction.normalizeWhitespace('line\n\ttwo')).toBe('line two');
   });
 });
