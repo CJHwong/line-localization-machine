@@ -153,11 +153,18 @@ function identifyArticleContent() {
       if (text.length >= 10) articleTexts.add(text);
     });
 
-    const fullArticleText = normalizeWhitespace(article.textContent);
+    // Readability strips the title from article.content but returns it separately.
+    // Include it so the page's <h1> title element passes the filter.
+    const normalizedTitle = normalizeWhitespace(article.title);
+    if (normalizedTitle.length >= 10) {
+      articleTexts.add(normalizedTitle);
+    }
+
+    const fullArticleText = normalizedTitle + ' ' + normalizeWhitespace(article.textContent);
 
     console.log(
-      `[LLM] Readability: identified article with ${articleTexts.size} text blocks, ` +
-        `${fullArticleText.length} chars`
+      `[LLM] Readability: identified article "${normalizedTitle}" with ` +
+        `${articleTexts.size} text blocks, ${fullArticleText.length} chars`
     );
 
     return { articleTexts, fullArticleText };

@@ -294,6 +294,23 @@ describe('identifyArticleContent', () => {
     expect(TextExtraction.isArticleContent(el, articleData)).toBe(true);
   });
 
+  test('isArticleContent matches article title (Readability strips title from content)', () => {
+    // Readability returns title separately from content body.
+    // The title should be included in articleTexts so the page's <h1> passes the filter.
+    const articleData = {
+      articleTexts: new Set([
+        'Understanding the architecture of modern systems',
+        'The first paragraph introduces the topic and provides context.',
+      ]),
+      fullArticleText:
+        'Understanding the architecture of modern systems ' +
+        'The first paragraph introduces the topic and provides context.',
+    };
+    const h1 = document.createElement('h1');
+    h1.textContent = 'Understanding the architecture of modern systems';
+    expect(TextExtraction.isArticleContent(h1, articleData)).toBe(true);
+  });
+
   test('normalizeWhitespace collapses whitespace', () => {
     expect(TextExtraction.normalizeWhitespace('  hello   world  ')).toBe('hello world');
     expect(TextExtraction.normalizeWhitespace('line\n\ttwo')).toBe('line two');
