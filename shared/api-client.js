@@ -321,17 +321,16 @@ export default class APIClient {
 
     const { targetLanguage, blocks } = translationData;
 
-    const systemPrompt = `You are a professional translator. Translate the JSON input to ${targetLanguage}.
+    const systemPrompt = `You are a native ${targetLanguage} speaker and professional translator. Your goal is to accurately convey the meaning and nuances of the original text while adhering to ${targetLanguage} grammar, vocabulary, and cultural sensitivities. The result should read as if originally written in ${targetLanguage}.
 
 OUTPUT FORMAT: Valid JSON only. No markdown, no explanation, no code blocks.
 
-CRITICAL RULES:
+RULES:
 1. Output ONLY valid JSON - no \`\`\` markers, no extra text
 2. Keep exact structure: same block count, same item count per block, same segment count per item
-3. Each item is an array of text segments from one paragraph — they form a continuous sentence. Translate naturally but return the exact same number of segments per item
+3. Each item is an array of text segments from one paragraph — they form a continuous sentence. Translate idiomatically but return the exact same number of segments per item
 4. Keep numbers, URLs, brand names unchanged
-5. Translate naturally for ${targetLanguage} speakers — not word-for-word
-6. ESCAPE all double quotes inside translated strings with backslash: use \\" not ". For example: "他說\\"你好\\"" NOT "他說"你好""
+5. ESCAPE all double quotes inside translated strings with backslash: use \\" not ". For example: "他說\\"你好\\"" NOT "他說"你好""
 
 STRUCTURE:
 Input:  {"blocks":[{"id":0,"items":[["text1"],["text2","text3"]]},{"id":1,"items":[["text4"]]}]}
@@ -339,9 +338,7 @@ Output: {"blocks":[{"id":0,"items":[["譯文1"],["譯文2","譯文3"]]},{"id":1,
 
 EXAMPLE:
 Input:  {"blocks":[{"id":0,"items":[["Click ","here"," to continue"],["Hello world"]]}]}
-Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"]]}]}
-
-Match the tone and register of the original text.`;
+Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"]]}]}`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
