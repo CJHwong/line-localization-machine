@@ -13,8 +13,6 @@ describe('Extension Integration Tests', () => {
       apiEndpoint: 'http://localhost:3001/v1/chat/completions',
       model: 'gpt-4',
       targetLanguage: 'es',
-      blocksPerRequest: 5,
-      temperature: 0.3,
     };
 
     // Mock chrome.storage.local to use our mock storage
@@ -176,7 +174,6 @@ describe('Extension Integration Tests', () => {
             apiEndpoint: 'http://localhost:3001/v1/chat/completions',
             model: 'gpt-4',
             targetLanguage: 'es',
-            temperature: 0.3,
           },
           resolve
         );
@@ -201,7 +198,7 @@ describe('Extension Integration Tests', () => {
               content: textToTranslate,
             },
           ],
-          temperature: settings.temperature,
+          temperature: 1,
         }),
       });
 

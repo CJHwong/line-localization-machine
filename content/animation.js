@@ -2,83 +2,13 @@
  * Animation module for Line Localization Machine.
  *
  * Handles all visual feedback: progress bar, translation animations,
- * toggle button, speed adjustments, and completion sound.
+ * and toggle button.
  */
 
 // ─── Timing Helpers ───────────────────────────────────────────────────────────
 
-function getSpeedMultiplier(settings) {
-  const speed = settings?.animationSpeed || 'normal';
-  switch (speed) {
-    case 'slow':
-      return 1.5;
-    case 'fast':
-      return 0.6;
-    case 'normal':
-    default:
-      return 1.0;
-  }
-}
-
-function getAdjustedTiming(baseMs, settings) {
-  return Math.round(baseMs * getSpeedMultiplier(settings));
-}
-
-function delay(ms, settings) {
-  return new Promise(resolve => setTimeout(resolve, getAdjustedTiming(ms, settings)));
-}
-
-// ─── Speed-Adjusted CSS ──────────────────────────────────────────────────────
-
-function injectSpeedAdjustedCSS(settings) {
-  const existingStyle = document.getElementById('llm-speed-adjusted-styles');
-  if (existingStyle) existingStyle.remove();
-
-  const multiplier = getSpeedMultiplier(settings);
-  if (multiplier === 1.0) return;
-
-  const css = `
-    .llm-preparing::after {
-      animation-duration: ${2.4 * multiplier}s !important;
-    }
-    .llm-fading-out {
-      animation-duration: ${0.06 * multiplier}s !important;
-    }
-    .llm-translated {
-      animation-duration: ${0.18 * multiplier}s !important;
-    }
-    .llm-settled {
-      transition-duration: ${0.2 * multiplier}s !important;
-    }
-    .llm-error {
-      animation-duration: ${0.25 * multiplier}s !important;
-    }
-    .llm-block-loading::after {
-      animation-duration: ${0.8 * multiplier}s !important;
-    }
-    .llm-showing-original {
-      transition-duration: ${0.15 * multiplier}s !important;
-    }
-    #llm-progress-bar {
-      animation-duration: ${0.3 * multiplier}s !important;
-    }
-    .llm-progress-fill {
-      transition-duration: ${0.3 * multiplier}s !important;
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .llm-preparing::after, .llm-fading-out, .llm-translated, .llm-error {
-        animation: none !important;
-      }
-      .llm-settled {
-        transition: none !important;
-      }
-    }
-  `;
-
-  const style = document.createElement('style');
-  style.id = 'llm-speed-adjusted-styles';
-  style.textContent = css;
-  document.head.appendChild(style);
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // ─── Progress Bar ─────────────────────────────────────────────────────────────
@@ -208,7 +138,7 @@ function escapeHTML(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function updateTranslationProgress(current, total, settings) {
+function updateTranslationProgress(current, total) {
   const progressBar = document.getElementById('llm-progress-bar');
   if (progressBar) {
     const percentage = Math.round((current / total) * 100);
@@ -222,22 +152,18 @@ function updateTranslationProgress(current, total, settings) {
   }
 }
 
-function hideTranslationProgress(settings) {
-  setTimeout(
-    () => {
-      const progressBar = document.getElementById('llm-progress-bar');
-      const style = document.querySelector('style[data-llm-progress]');
+function hideTranslationProgress() {
+  setTimeout(() => {
+    const progressBar = document.getElementById('llm-progress-bar');
+    const style = document.querySelector('style[data-llm-progress]');
 
-      if (progressBar) {
-        const animationDuration = getAdjustedTiming(300, settings);
-        progressBar.style.animation = `llmSlideIn ${animationDuration}ms ease reverse`;
-        setTimeout(() => progressBar.remove(), animationDuration);
-      }
+    if (progressBar) {
+      progressBar.style.animation = `llmSlideIn 300ms ease reverse`;
+      setTimeout(() => progressBar.remove(), 300);
+    }
 
-      if (style) style.remove();
-    },
-    getAdjustedTiming(1000, settings)
-  );
+    if (style) style.remove();
+  }, 1000);
 }
 
 // ─── Block Animations ─────────────────────────────────────────────────────────
@@ -277,7 +203,7 @@ async function animateLineTransition(item, translatedSegments, settings, debug) 
   // Phase 1: Quick fade out
   element.classList.remove('llm-preparing');
   element.classList.add('llm-fading-out');
-  await delay(50, settings);
+  await delay(50);
 
   // Snapshot original innerHTML BEFORE any modification (for toggle restore)
   const originalHTML = element.innerHTML;
@@ -305,7 +231,7 @@ async function animateLineTransition(item, translatedSegments, settings, debug) 
   // Phase 3: Quick fade in
   element.classList.remove('llm-fading-out');
   element.classList.add('llm-translated');
-  await delay(60, settings);
+  await delay(60);
 
   // Phase 4: Settle
   element.classList.add('llm-settled');
@@ -315,15 +241,12 @@ async function animateLineTransition(item, translatedSegments, settings, debug) 
 
 // ─── Toggle Button ────────────────────────────────────────────────────────────
 
-function addGlobalToggleButton(translatedElements, settings) {
+function addGlobalToggleButton(translatedElements) {
   if (document.getElementById('llm-original-toggle')) return;
 
-  setTimeout(
-    () => {
-      createToggleButton(translatedElements);
-    },
-    getAdjustedTiming(1500, settings)
-  );
+  setTimeout(() => {
+    createToggleButton(translatedElements);
+  }, 1500);
 }
 
 function createToggleButton(translatedElements) {
@@ -432,55 +355,11 @@ function createToggleButton(translatedElements) {
   });
 }
 
-// ─── Completion Sound ─────────────────────────────────────────────────────────
-
-function playCompletionSound() {
-  try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator1 = audioContext.createOscillator();
-    const oscillator2 = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-
-    oscillator1.connect(gainNode);
-    oscillator2.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-
-    oscillator1.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5
-    oscillator2.frequency.setValueAtTime(783.99, audioContext.currentTime); // G5
-    oscillator1.type = 'sine';
-    oscillator2.type = 'sine';
-
-    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-    gainNode.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 0.05);
-    gainNode.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 0.2);
-    gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.4);
-
-    const startTime = audioContext.currentTime;
-    oscillator1.start(startTime);
-    oscillator2.start(startTime);
-    oscillator1.stop(startTime + 0.4);
-    oscillator2.stop(startTime + 0.4);
-  } catch (error) {
-    console.warn('Could not play completion sound:', error);
-    try {
-      const audio = new window.Audio(
-        'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmUhCjuZz/LNeSMFLrHa7eGWQQsVX7Tp65VFEAg+s+ruy2Q9Cz8h'
-      );
-      audio.volume = 0.1;
-      audio.play().catch(() => {});
-    } catch {
-      // Silent fail
-    }
-  }
-}
-
 // ─── Exports (global scope for content script) ───────────────────────────────
 
 // eslint-disable-next-line no-unused-vars
 const Animation = {
-  getAdjustedTiming,
   delay,
-  injectSpeedAdjustedCSS,
   showTranslationProgress,
   updateReasoningProgress,
   updateTranslationProgress,
@@ -490,5 +369,4 @@ const Animation = {
   animateTranslation,
   animateLineTransition,
   addGlobalToggleButton,
-  playCompletionSound,
 };

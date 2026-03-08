@@ -146,7 +146,6 @@ class BackgroundScript {
             },
             translationData,
             {
-              temperature: settings.temperature !== undefined ? settings.temperature : 0.3,
               maxTokens,
               reasoningEffort: settings.reasoningEffort || 'off',
               signal: abortController.signal,

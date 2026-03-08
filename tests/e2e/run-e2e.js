@@ -124,8 +124,6 @@ async function run() {
             apiEndpoint: 'http://localhost:3001/v1',
             model: 'gpt-4o-mini',
             targetLanguage: 'spanish',
-            blocksPerRequest: 3,
-            temperature: 0.3,
           },
         });
       },

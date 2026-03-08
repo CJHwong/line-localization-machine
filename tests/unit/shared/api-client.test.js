@@ -49,7 +49,7 @@ class APIClient {
           content: text,
         },
       ],
-      temperature: settings.temperature || 0.3,
+      temperature: 1,
     };
 
     const data = await this.makeRequest(endpoint, settings.apiKey, requestBody);
@@ -116,7 +116,6 @@ describe('API Client', () => {
       apiEndpoint: 'https://api.openai.com/v1',
       model: 'gpt-4o-mini',
       targetLanguage: 'Spanish',
-      temperature: 0.3,
     };
 
     test('should make correct API request', async () => {
@@ -153,7 +152,7 @@ describe('API Client', () => {
       const callArgs = global.fetch.mock.calls[0];
       const requestBody = JSON.parse(callArgs[1].body);
       expect(requestBody.model).toBe(mockSettings.model);
-      expect(requestBody.temperature).toBe(mockSettings.temperature);
+      expect(requestBody.temperature).toBe(1);
       expect(requestBody.messages).toHaveLength(2);
       expect(requestBody.messages[0].role).toBe('system');
       expect(requestBody.messages[0].content).toContain('Translate');
@@ -213,7 +212,6 @@ describe('API Client', () => {
       apiEndpoint: 'https://api.openai.com/v1',
       model: 'gpt-4o-mini',
       targetLanguage: 'Spanish',
-      temperature: 0.3,
     };
 
     test('should successfully test connection', async () => {

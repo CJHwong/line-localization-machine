@@ -12,11 +12,6 @@ class SettingsController {
       customModel: document.getElementById('customModel'),
       customModelSection: document.getElementById('customModelSection'),
       targetLanguage: document.getElementById('targetLanguage'),
-      animationSpeed: document.getElementById('animationSpeed'),
-      showProgress: document.getElementById('showProgress'),
-      playSound: document.getElementById('playSound'),
-      maxBlockSize: document.getElementById('maxBlockSize'),
-      temperature: document.getElementById('temperature'),
       reasoningEffort: document.getElementById('reasoningEffort'),
       toggleApiKey: document.getElementById('toggleApiKey'),
       testConnection: document.getElementById('testConnection'),
@@ -68,25 +63,6 @@ class SettingsController {
       this.elements.apiEndpoint.value = mergedSettings.apiEndpoint;
       this.elements.customModel.value = mergedSettings.customModel;
       this.elements.targetLanguage.value = mergedSettings.targetLanguage;
-      this.elements.animationSpeed.value = mergedSettings.animationSpeed;
-      this.elements.showProgress.checked = mergedSettings.showProgress;
-      this.elements.playSound.checked = mergedSettings.playSound;
-      this.elements.maxBlockSize.value = mergedSettings.maxBlockSize.toString();
-      // Handle temperature conversion to match select option values exactly
-      const tempValue = parseFloat(mergedSettings.temperature);
-      if (tempValue === 0.1) {
-        this.elements.temperature.value = '0.1';
-      } else if (tempValue === 0.3) {
-        this.elements.temperature.value = '0.3';
-      } else if (tempValue === 0.5) {
-        this.elements.temperature.value = '0.5';
-      } else if (tempValue === 0.85) {
-        this.elements.temperature.value = '0.85';
-      } else if (tempValue === 1.0 || tempValue === 1) {
-        this.elements.temperature.value = '1.0';
-      } else {
-        this.elements.temperature.value = tempValue.toString();
-      }
       this.elements.reasoningEffort.value = mergedSettings.reasoningEffort || 'off';
 
       // Handle model selection
@@ -137,11 +113,6 @@ class SettingsController {
       this.elements.apiEndpoint,
       this.elements.customModel,
       this.elements.targetLanguage,
-      this.elements.animationSpeed,
-      this.elements.showProgress,
-      this.elements.playSound,
-      this.elements.maxBlockSize,
-      this.elements.temperature,
       this.elements.reasoningEffort,
     ];
 
@@ -181,11 +152,6 @@ class SettingsController {
         model: actualModel,
         customModel: this.elements.customModel.value.trim(),
         targetLanguage: this.elements.targetLanguage.value,
-        animationSpeed: this.elements.animationSpeed.value,
-        showProgress: this.elements.showProgress.checked,
-        playSound: this.elements.playSound.checked,
-        maxBlockSize: parseInt(this.elements.maxBlockSize.value),
-        temperature: parseFloat(this.elements.temperature.value),
         reasoningEffort: this.elements.reasoningEffort.value,
       };
 

@@ -18,12 +18,7 @@ const ModelConfig = {
     model: 'gpt-4o-mini',
     customModel: '',
     targetLanguage: 'chinese-traditional',
-    animationSpeed: 'normal',
-    showProgress: true,
-    playSound: false,
-    maxBlockSize: 5,
-    temperature: 0.3,
-    blocksPerRequest: 5,
+    reasoningEffort: 'low',
   },
   isPredefinedModel(modelId) {
     return this.PREDEFINED_MODELS.includes(modelId);
@@ -68,18 +63,13 @@ describe('Models Configuration', () => {
       expect(defaults).toHaveProperty('apiEndpoint');
       expect(defaults).toHaveProperty('model');
       expect(defaults).toHaveProperty('targetLanguage');
-      expect(defaults).toHaveProperty('blocksPerRequest');
-      expect(defaults).toHaveProperty('temperature');
+      expect(defaults).toHaveProperty('reasoningEffort');
 
       expect(typeof defaults.apiEndpoint).toBe('string');
       expect(defaults.apiEndpoint).toContain('openai.com');
       expect(typeof defaults.model).toBe('string');
       expect(typeof defaults.targetLanguage).toBe('string');
-      expect(typeof defaults.blocksPerRequest).toBe('number');
-      expect(typeof defaults.temperature).toBe('number');
-
-      expect(defaults.temperature).toBeGreaterThanOrEqual(0);
-      expect(defaults.temperature).toBeLessThanOrEqual(1);
+      expect(typeof defaults.reasoningEffort).toBe('string');
     });
   });
 

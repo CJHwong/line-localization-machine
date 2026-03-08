@@ -138,16 +138,9 @@ class LineLocalizationMachine {
         completedBlocks: this.completedBlocks,
       });
 
-      if (this.translationSettings.playSound) {
-        Animation.playCompletionSound();
-      }
-
-      setTimeout(
-        () => {
-          this.clearTranslationState();
-        },
-        Animation.getAdjustedTiming(3000, this.translationSettings)
-      );
+      setTimeout(() => {
+        this.clearTranslationState();
+      }, 3000);
     } catch (error) {
       this.updateTranslationState({
         isTranslating: false,
@@ -158,12 +151,9 @@ class LineLocalizationMachine {
         error: error.message,
       });
 
-      setTimeout(
-        () => {
-          this.clearTranslationState();
-        },
-        Animation.getAdjustedTiming(5000, this.translationSettings)
-      );
+      setTimeout(() => {
+        this.clearTranslationState();
+      }, 5000);
 
       throw error;
     } finally {
@@ -186,11 +176,7 @@ class LineLocalizationMachine {
       completedBlocks: 0,
     });
 
-    Animation.injectSpeedAdjustedCSS(this.translationSettings);
-
-    if (this.translationSettings.showProgress !== false) {
-      Animation.showTranslationProgress();
-    }
+    Animation.showTranslationProgress();
 
     // Start scanning animation on all blocks
     textBlocks.forEach(block => {
@@ -287,13 +273,7 @@ class LineLocalizationMachine {
           completedCount++;
           this.completedBlocks = completedCount;
 
-          if (this.translationSettings.showProgress !== false) {
-            Animation.updateTranslationProgress(
-              completedCount,
-              textBlocks.length,
-              this.translationSettings
-            );
-          }
+          Animation.updateTranslationProgress(completedCount, textBlocks.length);
           this.updateTranslationState({
             isTranslating: true,
             status: 'translating',
@@ -332,11 +312,9 @@ class LineLocalizationMachine {
 
       port.onMessage.addListener(message => {
         if (message.type === 'reasoning') {
-          if (this.translationSettings.showProgress !== false) {
-            const seconds = (message.elapsed / 1000).toFixed(1);
-            const kChars = (message.chars / 1000).toFixed(0);
-            Animation.updateReasoningProgress(seconds, kChars, message.snippet);
-          }
+          const seconds = (message.elapsed / 1000).toFixed(1);
+          const kChars = (message.chars / 1000).toFixed(0);
+          Animation.updateReasoningProgress(seconds, kChars, message.snippet);
         } else if (message.type === 'block') {
           blockQueue.push({ blockIndex: message.index, translatedBlock: message.block });
           processQueue();
@@ -386,10 +364,8 @@ class LineLocalizationMachine {
       });
     });
 
-    if (this.translationSettings.showProgress !== false) {
-      Animation.hideTranslationProgress(this.translationSettings);
-    }
-    Animation.addGlobalToggleButton(this.translatedElements, this.translationSettings);
+    Animation.hideTranslationProgress();
+    Animation.addGlobalToggleButton(this.translatedElements);
   }
 
   getLanguageName(languageCode) {

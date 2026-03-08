@@ -42,18 +42,12 @@ export default class APIClient {
    * @param {string} config.model - Model to use
    * @param {Array} messages - Array of messages for the conversation
    * @param {Object} options - Additional options
-   * @param {number} options.temperature - Sampling temperature (default: 0.3)
    * @param {number} options.maxTokens - Maximum completion tokens (default: 2000)
    * @param {number} options.timeout - Request timeout in ms (default: 30000)
    * @returns {Promise<Object>} API response with success/error status
    */
   static async chatCompletion(config, messages, options = {}) {
-    const {
-      temperature = 0.3,
-      maxTokens = 2000,
-      timeout = 30000,
-      reasoningEffort = 'off',
-    } = options;
+    const { maxTokens = 2000, timeout = 30000, reasoningEffort = 'off' } = options;
 
     // Validate required config
     if (!config.apiKey) {
@@ -72,7 +66,7 @@ export default class APIClient {
     const requestBody = {
       model: config.model,
       messages: messages,
-      temperature: temperature,
+      temperature: 1,
       max_completion_tokens: maxTokens,
     };
 
@@ -173,7 +167,6 @@ export default class APIClient {
 
       const result = await this.chatCompletion(config, messages, {
         maxTokens: 50,
-        temperature: 1,
         timeout: 15000, // Shorter timeout for connection test
         reasoningEffort: options.reasoningEffort || 'off',
       });
@@ -205,12 +198,12 @@ export default class APIClient {
    *
    * @param {Object} config - API configuration (apiKey, apiEndpoint, model)
    * @param {Array} messages - Messages array
-   * @param {Object} options - temperature, maxTokens, reasoningEffort
+   * @param {Object} options - maxTokens, reasoningEffort
    * @param {Function} [onReasoning] - Called with {chars, elapsed} during reasoning phase
    * @yields {string} Content delta strings
    */
   static async *streamChatCompletion(config, messages, options = {}, onReasoning) {
-    const { temperature = 0.3, maxTokens = 2000, reasoningEffort = 'off', signal } = options;
+    const { maxTokens = 2000, reasoningEffort = 'off', signal } = options;
 
     if (!config.apiKey) throw new Error('API key is required');
     if (!config.apiEndpoint) throw new Error('API endpoint is required');
@@ -222,7 +215,7 @@ export default class APIClient {
     const requestBody = {
       model: config.model,
       messages,
-      temperature,
+      temperature: 1,
       max_completion_tokens: maxTokens,
       stream: true,
     };
@@ -233,7 +226,7 @@ export default class APIClient {
 
     console.log(
       `[APIClient] stream request: model=${config.model}, ` +
-        `reasoning_effort=${reasoningEffort}, temp=${temperature}, maxTokens=${maxTokens}`
+        `reasoning_effort=${reasoningEffort}, maxTokens=${maxTokens}`
     );
 
     const fetchOptions = {
@@ -350,7 +343,7 @@ export default class APIClient {
    *
    * @param {Object} config - API configuration
    * @param {Object} translationData - { targetLanguage, blocks: [{id, items}] }
-   * @param {Object} options - temperature, maxTokens, reasoningEffort
+   * @param {Object} options - maxTokens, reasoningEffort
    * @param {Function} onBlock - Called with (blockIndex, blockObject) as each block completes
    * @param {Function} [onReasoning] - Called with {chars, elapsed} during reasoning phase
    * @returns {Promise<Object>} { success, usage, model }
@@ -397,7 +390,6 @@ Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"
         config,
         messages,
         {
-          temperature: options.temperature !== undefined ? options.temperature : 0.3,
           maxTokens: options.maxTokens || 16000,
           reasoningEffort: options.reasoningEffort || 'off',
           signal: options.signal,

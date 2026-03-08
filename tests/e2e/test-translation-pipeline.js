@@ -183,14 +183,12 @@ class PipelineTest {
           apiEndpoint: API_ENDPOINT || 'https://api.openai.com/v1',
           model: MODEL_NAME || 'gpt-4o-mini',
           targetLanguage: TARGET_LANG,
-          temperature: 0.3,
         }
       : {
           apiKey: 'mock-api-key',
           apiEndpoint: `${MOCK_SERVER}/v1`,
           model: 'gpt-4o-mini',
           targetLanguage: TARGET_LANG,
-          temperature: 0.3,
         };
     console.log('   Sending START_TRANSLATION...');
     await this.serviceWorker.evaluate(

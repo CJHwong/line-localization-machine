@@ -43,12 +43,7 @@ class BeautifulPopupController {
             model: 'gpt-4o-mini',
             customModel: '',
             targetLanguage: 'chinese-traditional',
-            animationSpeed: 'normal',
-            showProgress: true,
-            playSound: false,
-            maxBlockSize: 5,
-            temperature: 0.3,
-            blocksPerRequest: 5,
+            reasoningEffort: 'low',
           };
         },
       };
@@ -175,12 +170,7 @@ class BeautifulPopupController {
         'apiEndpoint',
         'model',
         'targetLanguage',
-        'animationSpeed',
-        'showProgress',
-        'playSound',
-        'maxBlockSize',
-        'temperature',
-        'blocksPerRequest',
+        'reasoningEffort',
       ]);
 
       // Load shared config if not available

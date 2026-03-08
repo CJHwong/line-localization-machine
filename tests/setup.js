@@ -8,7 +8,6 @@ global.chrome = {
           apiEndpoint: 'https://api.openai.com/v1/chat/completions',
           model: 'gpt-4',
           targetLanguage: 'es',
-          temperature: 0.3,
         };
         if (callback) callback(mockData);
         return Promise.resolve(mockData);

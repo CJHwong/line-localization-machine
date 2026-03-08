@@ -79,6 +79,19 @@
                 </ul>
               </div>
             </div>
+
+            <div class="form-group">
+              <label for="reasoningEffort">Reasoning Effort</label>
+              <select id="reasoningEffort">
+                <option value="off">Off - Don't send (Default)</option>
+                <option value="none">None</option>
+                <option value="minimal">Minimal</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+              <small>Controls thinking depth for reasoning models (o1/o3)</small>
+            </div>
           </section>
 
           <!-- Language Configuration -->
@@ -104,81 +117,6 @@
                 <option value="norwegian">Norwegian</option>
               </select>
               <small>This will be the default language for new translations</small>
-            </div>
-          </section>
-
-          <!-- Animation Settings -->
-          <section class="settings-card">
-            <h2>Animation Settings</h2>
-            <div class="form-group">
-              <label for="animationSpeed">Animation Speed</label>
-              <select id="animationSpeed">
-                <option value="slow">Slow (Relaxed)</option>
-                <option value="normal">Normal (Recommended)</option>
-                <option value="fast">Fast (Quick)</option>
-              </select>
-              <small>Controls how fast the line-by-line animation plays</small>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" id="showProgress" />
-                <span class="checkmark"></span>
-                Show translation progress indicator
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" id="playSound" />
-                <span class="checkmark"></span>
-                Play completion sound
-              </label>
-            </div>
-          </section>
-
-          <!-- Advanced Settings -->
-          <section class="settings-card">
-            <h2>Advanced Settings</h2>
-            <div class="form-group">
-              <label for="maxBlockSize">Translation Block Size</label>
-              <select id="maxBlockSize">
-                <option value="5">Small (5 lines) - More API calls, better accuracy</option>
-                <option value="15">Medium (15 lines) - Balanced</option>
-                <option value="30">Large (30 lines) - Fewer API calls, faster</option>
-              </select>
-              <small>How many text lines to group together for translation</small>
-            </div>
-
-            <div class="form-group">
-              <label for="temperature">Translation Creativity</label>
-              <select id="temperature">
-                <option value="0.1">Ultra Conservative (0.1)</option>
-                <option value="0.3">Conservative (0.3)</option>
-                <option value="0.5">Balanced (0.5)</option>
-                <option value="0.85">Creative (0.85)</option>
-                <option value="1.0">Wild (1.0)</option>
-              </select>
-              <small
-                >Lower values = more literal translations, higher = more creative
-                interpretations</small
-              >
-            </div>
-
-            <div class="form-group">
-              <label for="reasoningEffort">Reasoning Effort</label>
-              <select id="reasoningEffort">
-                <option value="off">Off - Don't send (Default)</option>
-                <option value="none">None</option>
-                <option value="minimal">Minimal</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-              <small
-                >Controls how much reasoning the model does before responding (for o1/o3
-                models)</small
-              >
             </div>
           </section>
         </div>
