@@ -102,7 +102,7 @@ Settings stored in browser.storage.local:
 - `apiEndpoint`: API endpoint URL (default: OpenAI)
 - `model`: Selected model or custom model ID
 - `targetLanguage`: Default translation language
-- `blocksPerRequest`: Batch size (3, 5, or 8)
+- `blocksPerRequest`: Blocks per API request (3, 5, or 8; default 5)
 - `temperature`: Translation creativity (0.1-1.0 range, 0.3 default)
 
 #### Adding New Models

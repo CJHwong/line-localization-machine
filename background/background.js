@@ -270,6 +270,8 @@ class BackgroundScript {
         0
       );
       const maxTokens = Math.min(16000, Math.max(2000, totalChars * 4));
+      // Scale timeout: 30s base + 10s per 1000 chars, capped at 180s
+      const timeout = Math.min(180000, 30000 + Math.ceil(totalChars / 1000) * 10000);
 
       const result = await this.APIClient.translate(
         {
@@ -281,7 +283,7 @@ class BackgroundScript {
         {
           temperature: settings.temperature !== undefined ? settings.temperature : 0.3,
           maxTokens,
-          timeout: 60000,
+          timeout,
           reasoningEffort: settings.reasoningEffort || 'off',
         }
       );

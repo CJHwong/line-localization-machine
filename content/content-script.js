@@ -192,7 +192,7 @@ class LineLocalizationMachine {
       Animation.showTranslationProgress();
     }
 
-    const blocksPerRequest = this.translationSettings.blocksPerRequest || 15;
+    const blocksPerRequest = this.translationSettings.blocksPerRequest || 5;
     let completedCount = 0;
 
     // Create batches
