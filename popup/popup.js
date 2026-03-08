@@ -146,21 +146,7 @@ class BeautifulPopupController {
   }
 
   addEntryAnimations() {
-    // Stagger the card animations
-    const cards = document.querySelectorAll('.card');
-    cards.forEach((card, index) => {
-      card.style.opacity = '0';
-      card.style.transform = 'translateX(-20px)';
-
-      setTimeout(
-        () => {
-          card.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-          card.style.opacity = '1';
-          card.style.transform = 'translateX(0)';
-        },
-        100 + index * 100
-      );
-    });
+    // Entry animations handled by CSS
   }
 
   async loadSettings() {
@@ -368,41 +354,19 @@ class BeautifulPopupController {
   showTranslationInProgress() {
     const state = this.translationState;
     let statusText = 'Working';
-    let statusMessage = 'Translation in progress...';
 
     if (state.status === 'starting') {
       statusText = 'Starting';
-      statusMessage = 'Analyzing page content...';
     } else if (state.status === 'translating') {
       statusText = 'Translating';
-      const progress = state.progress || 0;
-      const completed = state.completedBlocks || 0;
-      const total = state.totalBlocks || 0;
-
-      if (total > 0) {
-        statusMessage = `Translating... ${completed}/${total} blocks (${progress}%)`;
-      } else {
-        statusMessage = 'Translating content...';
-      }
     } else if (state.status === 'completed') {
       statusText = 'Completed';
-      statusMessage = 'Translation finished!';
-      // Stop refresh timer when completed
       if (this.refreshTimer) {
         clearInterval(this.refreshTimer);
         this.refreshTimer = null;
       }
     } else if (state.status === 'error') {
       statusText = 'Error';
-      // Show user-friendly error message based on error type
-      if (state.errorType === 'authentication') {
-        statusMessage = 'Invalid API key';
-      } else if (state.errorType === 'client_error') {
-        statusMessage = 'Configuration error';
-      } else {
-        statusMessage = state.error || 'Translation failed';
-      }
-      // Stop refresh timer on error
       if (this.refreshTimer) {
         clearInterval(this.refreshTimer);
         this.refreshTimer = null;
@@ -410,7 +374,6 @@ class BeautifulPopupController {
     }
 
     this.updateStatusBadge('working', statusText);
-    this.showStatusMessage(statusMessage, 'info');
     this.elements.translatePage.disabled = true;
     this.startTranslationAnimation();
 
@@ -440,47 +403,25 @@ class BeautifulPopupController {
   }
 
   updateTranslationDisplay() {
-    // Update display for ongoing translation without starting timers
     const state = this.translationState;
     if (!state) return;
 
     let statusText = 'Working';
-    let statusMessage = 'Translation in progress...';
     let badgeType = 'working';
 
     if (state.status === 'starting') {
       statusText = 'Starting';
-      statusMessage = 'Analyzing page content...';
     } else if (state.status === 'translating') {
       statusText = 'Translating';
-      const progress = state.progress || 0;
-      const completed = state.completedBlocks || 0;
-      const total = state.totalBlocks || 0;
-
-      if (total > 0) {
-        statusMessage = `Translating... ${completed}/${total} blocks (${progress}%)`;
-      } else {
-        statusMessage = 'Translating content...';
-      }
     } else if (state.status === 'completed') {
       statusText = 'Completed';
-      statusMessage = 'Translation finished!';
       badgeType = 'ready';
     } else if (state.status === 'error') {
       statusText = 'Error';
       badgeType = 'error';
-      // Show user-friendly error message based on error type
-      if (state.errorType === 'authentication') {
-        statusMessage = 'Invalid API key';
-      } else if (state.errorType === 'client_error') {
-        statusMessage = 'Configuration error';
-      } else {
-        statusMessage = state.error || 'Translation failed';
-      }
     }
 
     this.updateStatusBadge(badgeType, statusText);
-    this.showStatusMessage(statusMessage, 'info');
     this.elements.translatePage.disabled = state.isTranslating;
   }
 
@@ -488,41 +429,22 @@ class BeautifulPopupController {
     this.elements.translatePage.addEventListener('click', () => this.translatePage());
     this.elements.openSettings.addEventListener('click', () => this.openSettings());
 
-    // Update language preference when changed
+    // Update language preference when changed — saves immediately
     this.elements.quickLanguage.addEventListener('change', async () => {
-      if (this.elements.quickLanguage.value) {
-        try {
-          await chrome.storage.local.set({
-            targetLanguage: this.elements.quickLanguage.value,
-          });
-          this.settings.targetLanguage = this.elements.quickLanguage.value;
-
-          // Show quick feedback
-          this.showStatusMessage('Language updated!', 'success', 2000);
-        } catch (error) {
-          console.error('Error saving language preference:', error);
-        }
-      }
-    });
-
-    // Add hover effects
-    this.elements.translatePage.addEventListener('mouseenter', () => {
-      if (!this.isTranslating && !this.elements.translatePage.disabled) {
-        this.elements.translatePage.style.transform = 'translateY(-3px) scale(1.02)';
-      }
-    });
-
-    this.elements.translatePage.addEventListener('mouseleave', () => {
-      if (!this.isTranslating) {
-        this.elements.translatePage.style.transform = '';
+      try {
+        await chrome.storage.local.set({
+          targetLanguage: this.elements.quickLanguage.value,
+        });
+        this.settings.targetLanguage = this.elements.quickLanguage.value;
+      } catch (error) {
+        console.error('Error saving language preference:', error);
       }
     });
   }
 
   async translatePage() {
     if (!this.settings.apiKey) {
-      this.showStatusMessage('Please configure your API key in settings first', 'warning');
-      setTimeout(() => this.openSettings(), 1500);
+      this.openSettings();
       return;
     }
 
@@ -544,10 +466,7 @@ class BeautifulPopupController {
       // Get active tab
       const tab = await BrowserAPI.getActiveTab();
 
-      // Determine target language (quick select overrides default)
-      const targetLanguage = this.elements.quickLanguage.value || this.settings.targetLanguage;
-
-      this.showStatusMessage('Analyzing page content...', 'info');
+      const targetLanguage = this.elements.quickLanguage.value;
 
       // Clear existing translation state in background script
       try {
@@ -626,7 +545,6 @@ class BeautifulPopupController {
       }
 
       if (response && response.success) {
-        this.showStatusMessage('Translation started! Watch the magic happen ✨', 'success', 3000);
         this.updateStatusBadge('working', 'Translating');
 
         // Show success animation
@@ -707,46 +625,7 @@ class BeautifulPopupController {
   }
 
   showSuccessAnimation() {
-    // Create confetti effect
-    const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57'];
-    for (let i = 0; i < 15; i++) {
-      setTimeout(() => this.createConfetti(colors[i % colors.length]), i * 50);
-    }
-  }
-
-  createConfetti(color) {
-    const confetti = document.createElement('div');
-    confetti.style.cssText = `
-      position: absolute;
-      width: 6px;
-      height: 6px;
-      background: ${color};
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 1000;
-      left: ${Math.random() * 100}%;
-      top: 20px;
-      animation: confettiFall 2s ease-out forwards;
-    `;
-
-    document.body.appendChild(confetti);
-
-    // Add CSS animation if not already added
-    if (!document.getElementById('confetti-style')) {
-      const style = document.createElement('style');
-      style.id = 'confetti-style';
-      style.textContent = `
-        @keyframes confettiFall {
-          to {
-            transform: translateY(500px) rotate(720deg);
-            opacity: 0;
-          }
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
-    setTimeout(() => confetti.remove(), 2000);
+    // Success is communicated via status badge + toast. No confetti.
   }
 
   openSettings() {

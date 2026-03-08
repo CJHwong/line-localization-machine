@@ -10,95 +10,52 @@
   <body>
     <div class="container">
       <header>
-        <div class="header-content">
-          <div class="header-title">
-            <img src="../assets/icon-48.png" alt="Line Localization Machine" class="header-icon" />
-            <h1>Line Localization Machine</h1>
-          </div>
-          <p>Configure your translation settings</p>
+        <div class="header-left">
+          <img src="../assets/icon-48.png" alt="" class="header-icon" />
+          <h1>Line Localization Machine</h1>
         </div>
       </header>
 
+      <div id="status" class="status"></div>
+
       <main>
-        <div class="settings-header">
-          <div class="settings-actions">
-            <button id="saveSettings" class="btn-primary">Save Settings</button>
-            <button id="resetSettings" class="btn-danger">Reset to Defaults</button>
+        <!-- Connection -->
+        <section class="section">
+          <h2>Connection</h2>
+          <div class="form-group">
+            <label for="apiKey">API Key</label>
+            <div class="input-with-toggle">
+              <input type="password" id="apiKey" placeholder="sk-..." />
+              <button type="button" id="toggleApiKey" class="btn-toggle" title="Show API key">
+                <span class="toggle-icon">&#x25C9;</span>
+              </button>
+            </div>
+            <small>Stored locally, never shared</small>
           </div>
-        </div>
 
-        <div id="status" class="status"></div>
+          <div class="form-group">
+            <label for="apiEndpoint">Endpoint</label>
+            <input type="url" id="apiEndpoint" placeholder="https://api.openai.com/v1" />
+            <small>OpenAI-compatible API endpoint</small>
+          </div>
 
-        <div class="settings-grid">
-          <!-- API Configuration -->
-          <section class="settings-card">
-            <h2>API Configuration</h2>
-            <div class="form-group">
-              <label for="apiKey">API Key</label>
-              <div class="input-with-toggle">
-                <input type="password" id="apiKey" placeholder="sk-..." />
-                <button type="button" id="toggleApiKey" class="btn-toggle" title="Show API key">
-                  <span class="toggle-icon">&#x25C9;</span>
-                </button>
-              </div>
-              <small>Your API key is stored locally and never shared</small>
-            </div>
+          <div class="form-group">
+            <button id="testConnection" class="btn-secondary">Test Connection</button>
+          </div>
+        </section>
 
-            <div class="form-group">
-              <label for="apiEndpoint">API Endpoint</label>
-              <input type="url" id="apiEndpoint" placeholder="https://api.openai.com/v1" />
-              <small>OpenAI-compatible API endpoint URL</small>
-            </div>
-
-            <div class="form-group">
-              <button id="testConnection" class="btn-secondary">Test Connection</button>
-            </div>
-          </section>
-
-          <!-- Model Configuration -->
-          <section class="settings-card">
-            <h2>Model Settings</h2>
+        <!-- Model & Language -->
+        <section class="section">
+          <h2>Model & Language</h2>
+          <div class="form-row">
             <div class="form-group">
               <label for="model">Model</label>
               <select id="model">
-                <!-- Model options will be populated by JavaScript -->
                 <option value="custom">Custom Model...</option>
               </select>
             </div>
-
-            <div class="form-group" id="customModelSection" style="display: none">
-              <label for="customModel">Custom Model ID</label>
-              <input type="text" id="customModel" placeholder="e.g., gpt-4-1106-preview" />
-              <small>Enter the exact model identifier from your API provider</small>
-              <div class="model-examples">
-                <h4>Examples</h4>
-                <ul>
-                  <li><strong>OpenAI:</strong> gpt-4-1106-preview, gpt-4-turbo-preview</li>
-                  <li><strong>Groq:</strong> mixtral-8x7b-32768, llama2-70b-4096</li>
-                  <li><strong>Perplexity:</strong> llama-3.1-sonar-small-128k-online</li>
-                </ul>
-              </div>
-            </div>
-
             <div class="form-group">
-              <label for="reasoningEffort">Reasoning Effort</label>
-              <select id="reasoningEffort">
-                <option value="off">Off - Don't send (Default)</option>
-                <option value="none">None</option>
-                <option value="minimal">Minimal</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-              <small>Controls thinking depth for reasoning models (o1/o3)</small>
-            </div>
-          </section>
-
-          <!-- Language Configuration -->
-          <section class="settings-card">
-            <h2>Translation Settings</h2>
-            <div class="form-group">
-              <label for="targetLanguage">Default Target Language</label>
+              <label for="targetLanguage">Language</label>
               <select id="targetLanguage">
                 <option value="spanish">Spanish</option>
                 <option value="french">French</option>
@@ -116,11 +73,34 @@
                 <option value="swedish">Swedish</option>
                 <option value="norwegian">Norwegian</option>
               </select>
-              <small>This will be the default language for new translations</small>
             </div>
-          </section>
-        </div>
+          </div>
+
+          <div class="form-group" id="customModelSection" style="display: none">
+            <label for="customModel">Custom Model ID</label>
+            <input type="text" id="customModel" placeholder="e.g., gpt-4-1106-preview" />
+            <small>Exact model identifier from your provider</small>
+          </div>
+
+          <div class="form-group">
+            <label for="reasoningEffort">Reasoning Effort</label>
+            <select id="reasoningEffort">
+              <option value="off">Off (Default)</option>
+              <option value="none">None</option>
+              <option value="minimal">Minimal</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <small>Thinking depth for reasoning models (o1/o3)</small>
+          </div>
+        </section>
       </main>
+
+      <footer class="actions-bar">
+        <button id="resetSettings" class="btn-danger">Reset to Defaults</button>
+        <button id="saveSettings" class="btn-primary">Save Settings</button>
+      </footer>
     </div>
 
     <script type="module" src="settings.js"></script>
