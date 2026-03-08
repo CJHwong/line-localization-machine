@@ -1,3 +1,5 @@
+import { parse as jsonriverParse } from '../vendor/jsonriver.js';
+
 /**
  * Centralized LLM API Client
  * Handles all requests to OpenAI-compatible API endpoints
@@ -195,17 +197,110 @@ export default class APIClient {
     }
   }
 
+  // ─── Streaming Methods ───────────────────────────────────────────────────────
+
   /**
-   * Make a JSON-based translation request
-   * @param {Object} config - API configuration
-   * @param {Object} translationData - Structured translation data
-   * @param {string} translationData.targetLanguage - Target language for translation
-   * @param {Array} translationData.blocks - Array of {id, items} objects
-   * @param {Object} options - Additional options
-   * @returns {Promise<Object>} Translation result with parsed blocks
+   * Async generator that streams chat completion deltas via SSE.
+   * Yields content strings as they arrive from the API.
+   *
+   * @param {Object} config - API configuration (apiKey, apiEndpoint, model)
+   * @param {Array} messages - Messages array
+   * @param {Object} options - temperature, maxTokens, reasoningEffort
+   * @yields {string} Content delta strings
    */
-  static async translate(config, translationData, options = {}) {
-    // Validate translationData structure
+  static async *streamChatCompletion(config, messages, options = {}) {
+    const { temperature = 0.3, maxTokens = 2000, reasoningEffort = 'off' } = options;
+
+    if (!config.apiKey) throw new Error('API key is required');
+    if (!config.apiEndpoint) throw new Error('API endpoint is required');
+    if (!config.model) throw new Error('Model is required');
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw new Error('Messages array is required and must not be empty');
+    }
+
+    const requestBody = {
+      model: config.model,
+      messages,
+      temperature,
+      max_completion_tokens: maxTokens,
+      stream: true,
+    };
+
+    if (reasoningEffort && reasoningEffort !== 'off') {
+      requestBody.reasoning_effort = reasoningEffort;
+    }
+
+    const response = await fetch(this.joinUrl(config.apiEndpoint, 'chat/completions'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error?.message || response.statusText;
+      const error = new Error(`API Error: ${response.status} - ${errorMessage}`);
+      error.status = response.status;
+      error.type = this.categorizeError(response.status);
+      error.isRetryable = response.status >= 500 || response.status === 429;
+      error.apiMessage = errorMessage;
+      error.retryAfter = response.headers.get('retry-after');
+      throw error;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        // Keep the last (possibly incomplete) line in the buffer
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith(':')) continue; // skip empty/comment lines
+          if (trimmed === 'data: [DONE]') return;
+          if (!trimmed.startsWith('data: ')) continue;
+
+          try {
+            const payload = JSON.parse(trimmed.slice(6));
+            const delta = payload.choices?.[0]?.delta;
+            if (!delta) continue;
+            // Content from normal models
+            const content = delta.content || delta.reasoning || delta.reasoning_content;
+            if (content) yield content;
+          } catch {
+            // Skip malformed SSE lines
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /**
+   * Stream a translation request, calling onBlock as each block completes.
+   *
+   * Uses jsonriver to progressively parse the JSON response. When a complete
+   * block object appears at path ['blocks', N], fires onBlock(index, block).
+   *
+   * @param {Object} config - API configuration
+   * @param {Object} translationData - { targetLanguage, blocks: [{id, items}] }
+   * @param {Object} options - temperature, maxTokens, reasoningEffort
+   * @param {Function} onBlock - Called with (blockIndex, blockObject) as each block completes
+   * @returns {Promise<Object>} { success, usage, model }
+   */
+  static async streamTranslate(config, translationData, options = {}, onBlock) {
     if (!translationData || !translationData.blocks || !Array.isArray(translationData.blocks)) {
       return {
         success: false,
@@ -217,7 +312,6 @@ export default class APIClient {
 
     const { targetLanguage, blocks } = translationData;
 
-    // Build system prompt optimized for JSON output with segment arrays
     const systemPrompt = `You are a professional translator. Translate the JSON input to ${targetLanguage}.
 
 OUTPUT FORMAT: Valid JSON only. No markdown, no explanation, no code blocks.
@@ -241,34 +335,71 @@ Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"
 Match the tone and register of the original text.`;
 
     const messages = [
-      {
-        role: 'system',
-        content: systemPrompt,
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({ blocks }),
-      },
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify({ blocks }) },
     ];
 
     try {
-      const result = await this.chatCompletion(config, messages, {
+      // Create an async iterable that yields content deltas from SSE
+      const deltaStream = this.streamChatCompletion(config, messages, {
         temperature: options.temperature !== undefined ? options.temperature : 0.3,
-        maxTokens: options.maxTokens || 8000,
-        timeout: options.timeout || 60000,
+        maxTokens: options.maxTokens || 16000,
         reasoningEffort: options.reasoningEffort || 'off',
       });
 
-      // Parse JSON response
-      const parsedResponse = this.parseJSONResponse(result.content, blocks.length);
+      // Track which blocks have been delivered to avoid duplicates
+      const deliveredBlocks = new Set();
 
-      return {
-        success: true,
-        blocks: parsedResponse.blocks,
-        usage: result.usage,
-        model: result.model,
+      // Use jsonriver to parse the streamed JSON progressively
+      // completeCallback fires whenever a JSON value finishes parsing
+      const completeCallback = (value, pathInfo) => {
+        const segments = pathInfo.segments();
+        // We want path: blocks, <index> — meaning segments = ['blocks', N]
+        if (
+          segments.length === 2 &&
+          segments[0] === 'blocks' &&
+          typeof segments[1] === 'number' &&
+          typeof value === 'object' &&
+          value !== null &&
+          value.id !== undefined &&
+          Array.isArray(value.items)
+        ) {
+          const blockIndex = segments[1];
+          if (!deliveredBlocks.has(blockIndex)) {
+            deliveredBlocks.add(blockIndex);
+            onBlock(blockIndex, value);
+          }
+        }
       };
+
+      // Drain the async iterator — jsonriver does the heavy lifting.
+      // jsonriver may throw "Unexpected end of content" when the SSE stream
+      // closes (generator returns on [DONE]) while the tokenizer still has
+      // moreContentExpected=true. This is harmless if blocks were delivered.
+      try {
+        for await (const _partial of jsonriverParse(deltaStream, { completeCallback })) {
+          // Each yield is a progressively-complete snapshot; we only care
+          // about the completeCallback firing for individual blocks.
+        }
+      } catch (parseError) {
+        if (deliveredBlocks.size > 0) {
+          // Blocks were already delivered via completeCallback — the parse
+          // error is just jsonriver upset about the stream closing mid-token.
+          // Log it and move on.
+          console.warn(
+            `[APIClient] jsonriver parse ended with ${deliveredBlocks.size}/${blocks.length} blocks delivered:`,
+            parseError.message
+          );
+        } else {
+          // No blocks delivered at all — this is a real failure
+          throw parseError;
+        }
+      }
+
+      return { success: true };
     } catch (error) {
+      console.error('[APIClient] streamTranslate error:', error.message);
+
       return {
         success: false,
         error: error.message,
@@ -279,234 +410,6 @@ Match the tone and register of the original text.`;
         retryAfter: error.retryAfter,
       };
     }
-  }
-
-  /**
-   * Parse JSON response from LLM, handling common formatting issues
-   * @param {string} content - Raw response content
-   * @param {number} expectedBlockCount - Expected number of blocks
-   * @returns {Object} Parsed response with blocks array
-   */
-  static parseJSONResponse(content, expectedBlockCount) {
-    // Strip markdown code fences (handles truncated responses missing the closing fence)
-    const stripped = content
-      .trim()
-      .replace(/^```(?:json)?\s*\n?/, '')
-      .replace(/\n?```\s*$/, '');
-
-    console.log(
-      `[APIClient] parseJSONResponse: ${stripped.length} chars, expected ${expectedBlockCount} blocks`
-    );
-
-    // Try direct parse
-    let firstParseError;
-    try {
-      const parsed = JSON.parse(stripped);
-      if (parsed.blocks && Array.isArray(parsed.blocks)) {
-        console.log(`[APIClient] Direct parse OK: ${parsed.blocks.length} blocks`);
-        return parsed;
-      }
-      console.warn(`[APIClient] Parsed OK but no blocks array. Keys: ${Object.keys(parsed)}`);
-    } catch (e) {
-      firstParseError = e;
-      console.warn(`[APIClient] Direct parse failed: ${e.message}`);
-      // Log the end of the response to see if it's truncated
-      console.log(
-        `[APIClient] Response tail (last 200 chars): ${stripped.substring(stripped.length - 200)}`
-      );
-    }
-
-    // Repair unescaped double quotes inside JSON string values.
-    // LLMs translating to CJK languages often produce bare quotes like "命令" inside strings.
-    // Strategy: walk the string character by character, tracking whether we're inside a JSON
-    // string value. Any quote that isn't a structural delimiter gets escaped.
-    const repaired = this.repairUnescapedQuotes(stripped);
-    if (repaired !== stripped) {
-      try {
-        const parsed = JSON.parse(repaired);
-        if (parsed.blocks && Array.isArray(parsed.blocks)) {
-          console.log(`[APIClient] Quote-repair parse OK: ${parsed.blocks.length} blocks`);
-          return parsed;
-        }
-      } catch (e) {
-        console.warn(`[APIClient] Quote-repair parse failed: ${e.message}`);
-      }
-    }
-
-    // Try to find a JSON object containing "blocks" in the response
-    const jsonMatch = stripped.match(/\{[\s\S]*"blocks"[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.blocks && Array.isArray(parsed.blocks)) {
-          console.log(`[APIClient] Regex extraction OK: ${parsed.blocks.length} blocks`);
-          return parsed;
-        }
-      } catch (e) {
-        console.warn(`[APIClient] Regex extraction failed: ${e.message}`);
-      }
-    }
-
-    // Truncation recovery: LLM hit max_tokens before finishing the JSON.
-    // Try appending common closing sequences to salvage complete blocks.
-    const closings = [']}]}', '"]}]}', '"]]}]}', '""]}]}', '"]]]}]}'];
-    for (const closing of closings) {
-      try {
-        const repaired = stripped + closing;
-        const parsed = JSON.parse(repaired);
-        if (parsed.blocks && Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
-          // Drop the last block — it's likely the one that got cut off mid-item
-          if (parsed.blocks.length > 1) {
-            parsed.blocks.pop();
-          }
-          console.log(
-            `[APIClient] Truncation recovery OK with "${closing}": ${parsed.blocks.length} blocks`
-          );
-          return parsed;
-        }
-      } catch (e) {
-        // Try next closing
-      }
-    }
-
-    // Last resort: salvage individual valid blocks from corrupted JSON.
-    // LLMs sometimes hallucinate garbage mid-response (e.g. "id":民主" instead of "id":2),
-    // corrupting the outer structure while leaving other blocks intact.
-    const salvaged = this.salvageBlocks(stripped);
-    if (salvaged.blocks.length > 0) {
-      console.log(
-        `[APIClient] Block salvage recovered ${salvaged.blocks.length}/${expectedBlockCount} blocks`
-      );
-      return salvaged;
-    }
-
-    const parseError = firstParseError ? firstParseError.message : 'unknown';
-    throw new Error(
-      `Failed to parse JSON response (${parseError}). ` +
-        `Expected ${expectedBlockCount} blocks, response ${stripped.length} chars. ` +
-        `Head: ${stripped.substring(0, 100)}... Tail: ${stripped.substring(stripped.length - 100)}`
-    );
-  }
-
-  /**
-   * Repair unescaped double quotes inside JSON string values.
-   *
-   * LLMs often embed bare " characters in translated text (e.g. Chinese quotation marks
-   * like "命令"). This breaks JSON.parse. We walk the string tracking JSON structure
-   * and escape any quote that appears mid-value (i.e. not a structural delimiter).
-   *
-   * @param {string} json - Raw JSON string that may contain unescaped quotes
-   * @returns {string} Repaired JSON string
-   */
-  static repairUnescapedQuotes(json) {
-    const result = [];
-    let inString = false;
-    let i = 0;
-
-    while (i < json.length) {
-      const ch = json[i];
-
-      if (!inString) {
-        result.push(ch);
-        if (ch === '"') inString = true;
-        i++;
-        continue;
-      }
-
-      // Inside a string value
-      if (ch === '\\') {
-        // Escaped character — copy both the backslash and next char
-        result.push(ch);
-        if (i + 1 < json.length) {
-          result.push(json[i + 1]);
-          i += 2;
-        } else {
-          i++;
-        }
-        continue;
-      }
-
-      if (ch === '"') {
-        // Is this the real closing quote, or a bare quote embedded in text?
-        // Look ahead: after a closing string quote, JSON expects , ] } or :
-        const after = json.substring(i + 1).match(/^\s*(.)/);
-        const nextChar = after ? after[1] : '';
-
-        if (nextChar === '' || ',]}: \n\r\t'.includes(nextChar)) {
-          // Structural closing quote
-          result.push(ch);
-          inString = false;
-        } else {
-          // Bare quote inside string — escape it
-          result.push('\\"');
-        }
-        i++;
-        continue;
-      }
-
-      result.push(ch);
-      i++;
-    }
-
-    return result.join('');
-  }
-
-  /**
-   * Salvage valid blocks from corrupted JSON.
-   *
-   * When the LLM hallucinates garbage mid-response (e.g. "id":民主" instead of "id":2),
-   * the outer JSON structure is broken but individual blocks may still be valid.
-   * Extract each {"id":N,"items":...} object and parse it independently.
-   *
-   * @param {string} json - Corrupted JSON string
-   * @returns {Object} { blocks: [...valid blocks...] }
-   */
-  static salvageBlocks(json) {
-    const blocks = [];
-    // Match block-shaped objects: {"id": <number>, "items": <array>}
-    // Use a simple brace-depth counter to find complete objects after "id":
-    const blockStarts = [...json.matchAll(/\{\s*"id"\s*:\s*(\d+)\s*,\s*"items"\s*:/g)];
-
-    for (const match of blockStarts) {
-      const startIdx = match.index;
-      let depth = 0;
-      let endIdx = -1;
-
-      for (let i = startIdx; i < json.length; i++) {
-        const ch = json[i];
-        if (ch === '"') {
-          // Skip string contents
-          i++;
-          while (i < json.length && json[i] !== '"') {
-            if (json[i] === '\\') i++; // skip escaped char
-            i++;
-          }
-          continue;
-        }
-        if (ch === '{') depth++;
-        if (ch === '}') {
-          depth--;
-          if (depth === 0) {
-            endIdx = i;
-            break;
-          }
-        }
-      }
-
-      if (endIdx === -1) continue;
-
-      const blockStr = json.substring(startIdx, endIdx + 1);
-      try {
-        const block = JSON.parse(blockStr);
-        if (block.id !== undefined && Array.isArray(block.items)) {
-          blocks.push(block);
-        }
-      } catch {
-        // This block is also corrupted, skip it
-      }
-    }
-
-    return { blocks };
   }
 
   /**

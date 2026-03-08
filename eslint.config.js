@@ -35,6 +35,7 @@ module.exports = [
         fetch: 'readonly',
         FormData: 'readonly',
         AbortController: 'readonly',
+        TextDecoder: 'readonly',
         NodeFilter: 'readonly',
         TreeWalker: 'readonly',
         confirm: 'readonly',
