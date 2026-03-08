@@ -214,28 +214,28 @@ export default class APIClient {
 
     const { targetLanguage, blocks } = translationData;
 
-    // Build system prompt optimized for JSON output
+    // Build system prompt optimized for JSON output with segment arrays
     const systemPrompt = `You are a professional translator. Translate the JSON input to ${targetLanguage}.
 
 OUTPUT FORMAT: Valid JSON only. No markdown, no explanation, no code blocks.
 
 CRITICAL RULES:
 1. Output ONLY valid JSON - no \`\`\` markers, no extra text
-2. Keep exact structure: same block count, same item count per block
-3. [T:N]...[/T:N] markers: translate the text BETWEEN them, keep the markers exactly as-is
-4. [O:N] markers: keep exactly where they are, do not modify or remove them
-5. Keep numbers, URLs, brand names unchanged
-6. Translate naturally for ${targetLanguage} speakers
+2. Keep exact structure: same block count, same item count per block, same segment count per item
+3. Each item is an array of text segments from one paragraph — they form a continuous sentence. Translate naturally but return the exact same number of segments per item
+4. Keep numbers, URLs, brand names unchanged
+5. Translate naturally for ${targetLanguage} speakers — not word-for-word
+6. ESCAPE all double quotes inside translated strings with backslash: use \\" not ". For example: "他說\\"你好\\"" NOT "他說"你好""
 
 STRUCTURE:
-Input:  {"blocks":[{"id":0,"items":["text1","text2"]},{"id":1,"items":["text3"]}]}
-Output: {"blocks":[{"id":0,"items":["譯文1","譯文2"]},{"id":1,"items":["譯文3"]}]}
+Input:  {"blocks":[{"id":0,"items":[["text1"],["text2","text3"]]},{"id":1,"items":[["text4"]]}]}
+Output: {"blocks":[{"id":0,"items":[["譯文1"],["譯文2","譯文3"]]},{"id":1,"items":[["譯文4"]]}]}
 
 EXAMPLE:
-Input:  {"blocks":[{"id":0,"items":["Hello world","Click [T:1]here[/T:1] to continue [O:2]"]}]}
-Output: {"blocks":[{"id":0,"items":["你好世界","點擊 [T:1]這裡[/T:1] 繼續 [O:2]"]}]}
+Input:  {"blocks":[{"id":0,"items":[["Click ","here"," to continue"],["Hello world"]]}]}
+Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"]]}]}
 
-Translate naturally - not word-for-word. Match the tone of the original.`;
+Match the tone and register of the original text.`;
 
     const messages = [
       {
@@ -251,7 +251,7 @@ Translate naturally - not word-for-word. Match the tone of the original.`;
     try {
       const result = await this.chatCompletion(config, messages, {
         temperature: options.temperature !== undefined ? options.temperature : 0.3,
-        maxTokens: options.maxTokens || 4000,
+        maxTokens: options.maxTokens || 8000,
         timeout: options.timeout || 60000,
         reasoningEffort: options.reasoningEffort || 'off',
       });
@@ -285,48 +285,156 @@ Translate naturally - not word-for-word. Match the tone of the original.`;
    * @returns {Object} Parsed response with blocks array
    */
   static parseJSONResponse(content, expectedBlockCount) {
-    const jsonStr = content.trim();
+    // Strip markdown code fences (handles truncated responses missing the closing fence)
+    const stripped = content
+      .trim()
+      .replace(/^```(?:json)?\s*\n?/, '')
+      .replace(/\n?```\s*$/, '');
 
-    // Try direct parse first
+    console.log(
+      `[APIClient] parseJSONResponse: ${stripped.length} chars, expected ${expectedBlockCount} blocks`
+    );
+
+    // Try direct parse
+    let firstParseError;
     try {
-      const parsed = JSON.parse(jsonStr);
+      const parsed = JSON.parse(stripped);
       if (parsed.blocks && Array.isArray(parsed.blocks)) {
+        console.log(`[APIClient] Direct parse OK: ${parsed.blocks.length} blocks`);
         return parsed;
       }
+      console.warn(`[APIClient] Parsed OK but no blocks array. Keys: ${Object.keys(parsed)}`);
     } catch (e) {
-      // Continue to fallback methods
+      firstParseError = e;
+      console.warn(`[APIClient] Direct parse failed: ${e.message}`);
+      // Log the end of the response to see if it's truncated
+      console.log(
+        `[APIClient] Response tail (last 200 chars): ${stripped.substring(stripped.length - 200)}`
+      );
     }
 
-    // Try to extract JSON from markdown code block
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (codeBlockMatch) {
+    // Repair unescaped double quotes inside JSON string values.
+    // LLMs translating to CJK languages often produce bare quotes like "命令" inside strings.
+    // Strategy: walk the string character by character, tracking whether we're inside a JSON
+    // string value. Any quote that isn't a structural delimiter gets escaped.
+    const repaired = this.repairUnescapedQuotes(stripped);
+    if (repaired !== stripped) {
       try {
-        const parsed = JSON.parse(codeBlockMatch[1].trim());
+        const parsed = JSON.parse(repaired);
         if (parsed.blocks && Array.isArray(parsed.blocks)) {
+          console.log(`[APIClient] Quote-repair parse OK: ${parsed.blocks.length} blocks`);
           return parsed;
         }
       } catch (e) {
-        // Continue to next fallback
+        console.warn(`[APIClient] Quote-repair parse failed: ${e.message}`);
       }
     }
 
-    // Try to find JSON object in the response
-    const jsonMatch = jsonStr.match(/\{[\s\S]*"blocks"[\s\S]*\}/);
+    // Try to find a JSON object containing "blocks" in the response
+    const jsonMatch = stripped.match(/\{[\s\S]*"blocks"[\s\S]*\}/);
     if (jsonMatch) {
       try {
         const parsed = JSON.parse(jsonMatch[0]);
         if (parsed.blocks && Array.isArray(parsed.blocks)) {
+          console.log(`[APIClient] Regex extraction OK: ${parsed.blocks.length} blocks`);
           return parsed;
         }
       } catch (e) {
-        // Continue to error
+        console.warn(`[APIClient] Regex extraction failed: ${e.message}`);
       }
     }
 
-    // If all parsing fails, throw error
+    // Truncation recovery: LLM hit max_tokens before finishing the JSON.
+    // Try appending common closing sequences to salvage complete blocks.
+    const closings = [']}]}', '"]}]}', '"]]}]}', '""]}]}', '"]]]}]}'];
+    for (const closing of closings) {
+      try {
+        const repaired = stripped + closing;
+        const parsed = JSON.parse(repaired);
+        if (parsed.blocks && Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
+          // Drop the last block — it's likely the one that got cut off mid-item
+          if (parsed.blocks.length > 1) {
+            parsed.blocks.pop();
+          }
+          console.log(
+            `[APIClient] Truncation recovery OK with "${closing}": ${parsed.blocks.length} blocks`
+          );
+          return parsed;
+        }
+      } catch (e) {
+        // Try next closing
+      }
+    }
+
+    const parseError = firstParseError ? firstParseError.message : 'unknown';
     throw new Error(
-      `Failed to parse JSON response. Expected ${expectedBlockCount} blocks. Raw response: ${jsonStr.substring(0, 200)}...`
+      `Failed to parse JSON response (${parseError}). ` +
+        `Expected ${expectedBlockCount} blocks, response ${stripped.length} chars. ` +
+        `Head: ${stripped.substring(0, 100)}... Tail: ${stripped.substring(stripped.length - 100)}`
     );
+  }
+
+  /**
+   * Repair unescaped double quotes inside JSON string values.
+   *
+   * LLMs often embed bare " characters in translated text (e.g. Chinese quotation marks
+   * like "命令"). This breaks JSON.parse. We walk the string tracking JSON structure
+   * and escape any quote that appears mid-value (i.e. not a structural delimiter).
+   *
+   * @param {string} json - Raw JSON string that may contain unescaped quotes
+   * @returns {string} Repaired JSON string
+   */
+  static repairUnescapedQuotes(json) {
+    const result = [];
+    let inString = false;
+    let i = 0;
+
+    while (i < json.length) {
+      const ch = json[i];
+
+      if (!inString) {
+        result.push(ch);
+        if (ch === '"') inString = true;
+        i++;
+        continue;
+      }
+
+      // Inside a string value
+      if (ch === '\\') {
+        // Escaped character — copy both the backslash and next char
+        result.push(ch);
+        if (i + 1 < json.length) {
+          result.push(json[i + 1]);
+          i += 2;
+        } else {
+          i++;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        // Is this the real closing quote, or a bare quote embedded in text?
+        // Look ahead: after a closing string quote, JSON expects , ] } or :
+        const after = json.substring(i + 1).match(/^\s*(.)/);
+        const nextChar = after ? after[1] : '';
+
+        if (nextChar === '' || ',]}: \n\r\t'.includes(nextChar)) {
+          // Structural closing quote
+          result.push(ch);
+          inString = false;
+        } else {
+          // Bare quote inside string — escape it
+          result.push('\\"');
+        }
+        i++;
+        continue;
+      }
+
+      result.push(ch);
+      i++;
+    }
+
+    return result.join('');
   }
 
   /**
