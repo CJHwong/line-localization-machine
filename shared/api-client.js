@@ -115,8 +115,11 @@ export default class APIClient {
         throw new Error('Invalid API response format');
       }
 
-      // Safe content extraction
-      const messageContent = data.choices?.[0]?.message?.content;
+      // Safe content extraction — some models (DeepSeek, QwQ) put output in
+      // reasoning/reasoning_content instead of content
+      const message = data.choices[0].message;
+      const messageContent =
+        message.content || message.reasoning || message.reasoning_content || '';
       const content = (typeof messageContent === 'string' ? messageContent : '').trim();
 
       return {
@@ -366,6 +369,17 @@ Match the tone and register of the original text.`;
       }
     }
 
+    // Last resort: salvage individual valid blocks from corrupted JSON.
+    // LLMs sometimes hallucinate garbage mid-response (e.g. "id":民主" instead of "id":2),
+    // corrupting the outer structure while leaving other blocks intact.
+    const salvaged = this.salvageBlocks(stripped);
+    if (salvaged.blocks.length > 0) {
+      console.log(
+        `[APIClient] Block salvage recovered ${salvaged.blocks.length}/${expectedBlockCount} blocks`
+      );
+      return salvaged;
+    }
+
     const parseError = firstParseError ? firstParseError.message : 'unknown';
     throw new Error(
       `Failed to parse JSON response (${parseError}). ` +
@@ -435,6 +449,64 @@ Match the tone and register of the original text.`;
     }
 
     return result.join('');
+  }
+
+  /**
+   * Salvage valid blocks from corrupted JSON.
+   *
+   * When the LLM hallucinates garbage mid-response (e.g. "id":民主" instead of "id":2),
+   * the outer JSON structure is broken but individual blocks may still be valid.
+   * Extract each {"id":N,"items":...} object and parse it independently.
+   *
+   * @param {string} json - Corrupted JSON string
+   * @returns {Object} { blocks: [...valid blocks...] }
+   */
+  static salvageBlocks(json) {
+    const blocks = [];
+    // Match block-shaped objects: {"id": <number>, "items": <array>}
+    // Use a simple brace-depth counter to find complete objects after "id":
+    const blockStarts = [...json.matchAll(/\{\s*"id"\s*:\s*(\d+)\s*,\s*"items"\s*:/g)];
+
+    for (const match of blockStarts) {
+      const startIdx = match.index;
+      let depth = 0;
+      let endIdx = -1;
+
+      for (let i = startIdx; i < json.length; i++) {
+        const ch = json[i];
+        if (ch === '"') {
+          // Skip string contents
+          i++;
+          while (i < json.length && json[i] !== '"') {
+            if (json[i] === '\\') i++; // skip escaped char
+            i++;
+          }
+          continue;
+        }
+        if (ch === '{') depth++;
+        if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            endIdx = i;
+            break;
+          }
+        }
+      }
+
+      if (endIdx === -1) continue;
+
+      const blockStr = json.substring(startIdx, endIdx + 1);
+      try {
+        const block = JSON.parse(blockStr);
+        if (block.id !== undefined && Array.isArray(block.items)) {
+          blocks.push(block);
+        }
+      } catch {
+        // This block is also corrupted, skip it
+      }
+    }
+
+    return { blocks };
   }
 
   /**
