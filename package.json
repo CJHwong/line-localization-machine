@@ -1,6 +1,6 @@
 {
   "name": "line-localization-machine",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "AI-powered line-by-line webpage translation with stunning animations",
   "main": "manifest.json",
   "scripts": {
