@@ -1,4 +1,4 @@
-import { parse as jsonriverParse } from '../vendor/jsonriver.js';
+import { parse as jsonriverParse } from '../vendor/jsonriver-1.1.1/index.js';
 
 /**
  * Centralized LLM API Client

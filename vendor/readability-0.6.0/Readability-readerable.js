@@ -30,12 +30,14 @@ var REGEXPS = {
 function isNodeVisible(node) {
   // Have to null-check node.style and node.className.includes to deal with SVG and MathML nodes.
   return (
-    (!node.style || node.style.display != 'none') &&
-    !node.hasAttribute('hidden') &&
+    (!node.style || node.style.display != "none") &&
+    !node.hasAttribute("hidden") &&
     //check for "fallback-image" so that wikimedia math images are displayed
-    (!node.hasAttribute('aria-hidden') ||
-      node.getAttribute('aria-hidden') != 'true' ||
-      (node.className && node.className.includes && node.className.includes('fallback-image')))
+    (!node.hasAttribute("aria-hidden") ||
+      node.getAttribute("aria-hidden") != "true" ||
+      (node.className &&
+        node.className.includes &&
+        node.className.includes("fallback-image")))
   );
 }
 
@@ -50,7 +52,7 @@ function isNodeVisible(node) {
 function isProbablyReaderable(doc, options = {}) {
   // For backward compatibility reasons 'options' can either be a configuration object or the function used
   // to determine if a node is visible.
-  if (typeof options == 'function') {
+  if (typeof options == "function") {
     options = { visibilityChecker: options };
   }
 
@@ -61,7 +63,7 @@ function isProbablyReaderable(doc, options = {}) {
   };
   options = Object.assign(defaultOptions, options);
 
-  var nodes = doc.querySelectorAll('p, pre, article');
+  var nodes = doc.querySelectorAll("p, pre, article");
 
   // Get <div> nodes which have <br> node(s) and append them into the `nodes` variable.
   // Some articles' DOM structures might look like
@@ -70,7 +72,7 @@ function isProbablyReaderable(doc, options = {}) {
   //   <br>
   //   Sentences<br>
   // </div>
-  var brNodes = doc.querySelectorAll('div > br');
+  var brNodes = doc.querySelectorAll("div > br");
   if (brNodes.length) {
     var set = new Set(nodes);
     [].forEach.call(brNodes, function (node) {
@@ -87,7 +89,7 @@ function isProbablyReaderable(doc, options = {}) {
       return false;
     }
 
-    var matchString = node.className + ' ' + node.id;
+    var matchString = node.className + " " + node.id;
     if (
       REGEXPS.unlikelyCandidates.test(matchString) &&
       !REGEXPS.okMaybeItsACandidate.test(matchString)
@@ -95,7 +97,7 @@ function isProbablyReaderable(doc, options = {}) {
       return false;
     }
 
-    if (node.matches('li p')) {
+    if (node.matches("li p")) {
       return false;
     }
 
@@ -113,7 +115,7 @@ function isProbablyReaderable(doc, options = {}) {
   });
 }
 
-if (typeof module === 'object') {
+if (typeof module === "object") {
   /* eslint-disable-next-line no-redeclare */
   /* global module */
   module.exports = isProbablyReaderable;

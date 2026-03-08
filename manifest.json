@@ -14,8 +14,8 @@
     {
       "matches": ["<all_urls>"],
       "js": [
-        "vendor/Readability-readerable.js",
-        "vendor/Readability.js",
+        "vendor/readability-0.6.0/Readability-readerable.js",
+        "vendor/readability-0.6.0/Readability.js",
         "content/text-extraction.js",
         "content/animation.js",
         "content/content-script.js"
