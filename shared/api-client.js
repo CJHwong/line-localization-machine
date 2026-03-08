@@ -255,6 +255,26 @@ export default class APIClient {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    // Processes complete SSE lines, yielding content deltas
+    const processLines = function* (lines) {
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(':')) continue;
+        if (trimmed === 'data: [DONE]') return;
+        if (!trimmed.startsWith('data: ')) continue;
+
+        try {
+          const payload = JSON.parse(trimmed.slice(6));
+          const delta = payload.choices?.[0]?.delta;
+          if (!delta) continue;
+          const content = delta.content || delta.reasoning || delta.reasoning_content;
+          if (content) yield content;
+        } catch {
+          // Skip malformed SSE lines
+        }
+      }
+    };
+
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -262,26 +282,15 @@ export default class APIClient {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        // Keep the last (possibly incomplete) line in the buffer
         buffer = lines.pop();
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(':')) continue; // skip empty/comment lines
-          if (trimmed === 'data: [DONE]') return;
-          if (!trimmed.startsWith('data: ')) continue;
+        yield* processLines(lines);
+      }
 
-          try {
-            const payload = JSON.parse(trimmed.slice(6));
-            const delta = payload.choices?.[0]?.delta;
-            if (!delta) continue;
-            // Content from normal models
-            const content = delta.content || delta.reasoning || delta.reasoning_content;
-            if (content) yield content;
-          } catch {
-            // Skip malformed SSE lines
-          }
-        }
+      // Flush decoder and process any remaining buffered content
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        yield* processLines(buffer.split('\n'));
       }
     } finally {
       reader.releaseLock();
@@ -341,11 +350,17 @@ Match the tone and register of the original text.`;
 
     try {
       // Create an async iterable that yields content deltas from SSE
-      const deltaStream = this.streamChatCompletion(config, messages, {
+      const rawDeltaStream = this.streamChatCompletion(config, messages, {
         temperature: options.temperature !== undefined ? options.temperature : 0.3,
         maxTokens: options.maxTokens || 16000,
         reasoningEffort: options.reasoningEffort || 'off',
       });
+
+      // Wrap the delta stream to isolate the JSON object.
+      // Some models wrap output in ```json fences or add preamble text.
+      // We skip everything before the first '{' and stop after the
+      // matching '}' so jsonriver only sees valid JSON.
+      const deltaStream = this.isolateJSON(rawDeltaStream);
 
       // Track which blocks have been delivered to avoid duplicates
       const deliveredBlocks = new Set();
@@ -409,6 +424,97 @@ Match the tone and register of the original text.`;
         apiMessage: error.apiMessage,
         retryAfter: error.retryAfter,
       };
+    }
+  }
+
+  /**
+   * Wraps an async iterable of string chunks, yielding only the content
+   * between the first '{' and its matching '}'. Strips markdown code fences,
+   * preamble text, and trailing content that would choke a JSON parser.
+   *
+   * @param {AsyncIterable<string>} stream - Raw content delta stream
+   * @yields {string} JSON-only content chunks
+   */
+  static async *isolateJSON(stream) {
+    let depth = 0;
+    let started = false;
+    let inString = false;
+    let escaped = false;
+
+    for await (const chunk of stream) {
+      if (!started) {
+        // Scan for the first '{' — skip preamble/code fences
+        const openIdx = chunk.indexOf('{');
+        if (openIdx === -1) continue; // still in preamble
+        started = true;
+        // Walk from '{' onward, counting braces (skip string interiors)
+        let cutoff = -1;
+        for (let i = openIdx; i < chunk.length; i++) {
+          const ch = chunk[i];
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          if (ch === '\\' && inString) {
+            escaped = true;
+            continue;
+          }
+          if (ch === '"') {
+            inString = !inString;
+            continue;
+          }
+          if (inString) continue;
+          if (ch === '{') depth++;
+          else if (ch === '}') {
+            depth--;
+            if (depth <= 0) {
+              cutoff = i + 1;
+              break;
+            }
+          }
+        }
+        if (cutoff !== -1) {
+          yield chunk.slice(openIdx, cutoff);
+          return;
+        }
+        yield chunk.slice(openIdx);
+        continue;
+      }
+
+      // Already inside the JSON object — check if this chunk closes it
+      let cutoff = -1;
+      for (let i = 0; i < chunk.length; i++) {
+        const ch = chunk[i];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === '\\' && inString) {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = !inString;
+          continue;
+        }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth <= 0) {
+            cutoff = i + 1;
+            break;
+          }
+        }
+      }
+
+      if (cutoff !== -1) {
+        // Top-level object closes mid-chunk — yield up to the closing '}'
+        yield chunk.slice(0, cutoff);
+        return;
+      }
+
+      yield chunk;
     }
   }
 

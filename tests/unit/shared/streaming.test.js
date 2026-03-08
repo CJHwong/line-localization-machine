@@ -190,6 +190,103 @@ describe('progressive block assembly from streamed JSON', () => {
   });
 });
 
+// ─── JSON Isolation (code fence / preamble stripping) ───────────────────────
+
+describe('JSON isolation from LLM output', () => {
+  // Simulates the isolateJSON() logic: skip everything before first '{',
+  // track brace depth, stop after matching '}'
+
+  function isolateJSON(chunks) {
+    const result = [];
+    let depth = 0;
+    let started = false;
+    let inString = false;
+    let escaped = false;
+
+    for (const chunk of chunks) {
+      const startIdx = !started ? chunk.indexOf('{') : 0;
+      if (!started) {
+        if (startIdx === -1) continue;
+        started = true;
+      }
+
+      let cutoff = -1;
+      for (let i = startIdx; i < chunk.length; i++) {
+        const ch = chunk[i];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === '\\' && inString) {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = !inString;
+          continue;
+        }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth <= 0) {
+            cutoff = i + 1;
+            break;
+          }
+        }
+      }
+
+      if (cutoff !== -1) {
+        result.push(chunk.slice(startIdx, cutoff));
+        return result.join('');
+      }
+      result.push(chunk.slice(startIdx));
+    }
+    return result.join('');
+  }
+
+  test('passes clean JSON through unchanged', () => {
+    const json = '{"blocks":[{"id":0,"items":[["hello"]]}]}';
+    expect(isolateJSON([json])).toBe(json);
+  });
+
+  test('strips markdown code fences', () => {
+    const chunks = ['```json\n', '{"blocks":[{"id":0,"items":[["hello"]]}]}', '\n```'];
+    expect(isolateJSON(chunks)).toBe('{"blocks":[{"id":0,"items":[["hello"]]}]}');
+  });
+
+  test('strips preamble text before JSON', () => {
+    const chunks = ['Here is the translation:\n', '{"blocks":[{"id":0,"items":[["hi"]]}]}'];
+    expect(isolateJSON(chunks)).toBe('{"blocks":[{"id":0,"items":[["hi"]]}]}');
+  });
+
+  test('handles JSON split across chunks with code fences', () => {
+    const chunks = ['```json\n{"blo', 'cks":[{"id":0,"items":[["x"]]}]}', '\n```'];
+    expect(isolateJSON(chunks)).toBe('{"blocks":[{"id":0,"items":[["x"]]}]}');
+  });
+
+  test('handles opening brace mid-chunk with preamble', () => {
+    const chunks = ['Sure! {"blocks":[{"id":0,"items":[["a"]]}]}'];
+    expect(isolateJSON(chunks)).toBe('{"blocks":[{"id":0,"items":[["a"]]}]}');
+  });
+
+  test('stops at matching closing brace ignoring nested objects', () => {
+    const json = '{"blocks":[{"id":0,"items":[["a"]]}]}';
+    const chunks = [json + ' extra trailing garbage'];
+    expect(isolateJSON(chunks)).toBe(json);
+  });
+
+  test('ignores braces inside JSON string values', () => {
+    const json = '{"blocks":[{"id":0,"items":[["use function() { return x; }"]]}]}';
+    expect(isolateJSON([json])).toBe(json);
+  });
+
+  test('ignores escaped quotes inside strings', () => {
+    const json = '{"blocks":[{"id":0,"items":[["he said \\"hello\\" }"]]}]}';
+    expect(isolateJSON([json])).toBe(json);
+  });
+});
+
 // ─── Mock Server SSE Format ─────────────────────────────────────────────────
 
 describe('mock server SSE format compatibility', () => {
