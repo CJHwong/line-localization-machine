@@ -112,7 +112,7 @@ function showTranslationProgress() {
       font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
       animation: llmSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      min-width: 220px;
+      min-width: 260px;
     }
 
     @keyframes llmSlideIn {
@@ -137,6 +137,26 @@ function showTranslationProgress() {
       line-height: 1.3;
     }
 
+    .llm-reasoning-stats {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .llm-reasoning-snippet {
+      display: block;
+      font-size: 10px;
+      color: #b0aa9f;
+      font-style: italic;
+      max-width: 260px;
+      max-height: 3.9em;
+      line-height: 1.3;
+      overflow: hidden;
+      word-break: break-all;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+
     .llm-progress-track {
       width: 100%;
       height: 3px;
@@ -157,16 +177,48 @@ function showTranslationProgress() {
   document.body.appendChild(progressBar);
 }
 
+function updateReasoningProgress(seconds, kChars, snippet) {
+  const progressBar = document.getElementById('llm-progress-bar');
+  if (!progressBar) return;
+
+  const text = progressBar.querySelector('.llm-progress-text');
+  const fill = progressBar.querySelector('.llm-progress-fill');
+  const label = progressBar.querySelector('.llm-progress-label');
+
+  if (label) label.textContent = 'Thinking';
+
+  // Show stats + a sliding window of thinking text
+  if (text) {
+    const stats = `${seconds}s \u00b7 ${kChars}k chars`;
+    if (snippet) {
+      // Clean up the snippet: collapse whitespace, trim to ~80 chars
+      const clean = snippet.replace(/\s+/g, ' ').trim().slice(-200);
+      text.innerHTML =
+        `<span class="llm-reasoning-stats">${stats}</span>` +
+        `<span class="llm-reasoning-snippet">${escapeHTML(clean)}</span>`;
+    } else {
+      text.textContent = stats;
+    }
+  }
+
+  if (fill) fill.style.width = `${Math.min(30, Number(seconds) * 3)}%`;
+}
+
+function escapeHTML(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function updateTranslationProgress(current, total, settings) {
   const progressBar = document.getElementById('llm-progress-bar');
   if (progressBar) {
     const percentage = Math.round((current / total) * 100);
     const fill = progressBar.querySelector('.llm-progress-fill');
     const text = progressBar.querySelector('.llm-progress-text');
+    const label = progressBar.querySelector('.llm-progress-label');
 
+    if (label) label.textContent = 'Translating';
     fill.style.width = `${percentage}%`;
-    const blocksPerRequest = settings?.blocksPerRequest || 5;
-    text.textContent = `${current}/${total} blocks \u00b7 ${blocksPerRequest}/batch \u00b7 ${percentage}%`;
+    text.textContent = `${current}/${total} blocks \u00b7 ${percentage}%`;
   }
 }
 
@@ -430,6 +482,7 @@ const Animation = {
   delay,
   injectSpeedAdjustedCSS,
   showTranslationProgress,
+  updateReasoningProgress,
   updateTranslationProgress,
   hideTranslationProgress,
   animateBlockStart,

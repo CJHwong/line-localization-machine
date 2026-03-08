@@ -27,7 +27,7 @@ const ModelConfig = {
     playSound: false,
     maxBlockSize: 5,
     temperature: 0.3,
-    reasoningEffort: 'off',
+    reasoningEffort: 'low',
   },
 
   // Helper methods

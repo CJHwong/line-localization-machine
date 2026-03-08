@@ -220,15 +220,27 @@ class LineLocalizationMachine {
     let completedCount = 0;
 
     await new Promise((resolve, reject) => {
-      port.onMessage.addListener(async message => {
-        if (message.type === 'block') {
-          const blockIndex = message.index;
-          const translatedBlock = message.block;
+      // Queue blocks and render with minimum spacing so translations
+      // appear progressively even when the model bursts output all at once
+      // (common with reasoning models that think first, then dump the answer).
+      const MIN_RENDER_INTERVAL_MS = 120;
+      const blockQueue = [];
+      let rendering = false;
+      let streamDone = false;
+      let streamError = null;
+
+      const processQueue = async () => {
+        if (rendering) return;
+        rendering = true;
+
+        while (blockQueue.length > 0) {
+          const renderStart = Date.now();
+          const { blockIndex, translatedBlock } = blockQueue.shift();
           const originalBlock = textBlocks[blockIndex];
 
           if (!originalBlock) {
             console.warn(`[LLM] Received block ${blockIndex} but no matching original`);
-            return;
+            continue;
           }
 
           try {
@@ -293,31 +305,76 @@ class LineLocalizationMachine {
           console.log(
             `[LLM] Block ${blockIndex} rendered (${completedCount}/${textBlocks.length})`
           );
-        } else if (message.type === 'done') {
+
+          // Enforce minimum spacing between block renders so the user
+          // sees a progressive reveal instead of an instant dump
+          if (blockQueue.length > 0) {
+            const elapsed = Date.now() - renderStart;
+            const remaining = MIN_RENDER_INTERVAL_MS - elapsed;
+            if (remaining > 0) {
+              await new Promise(r => setTimeout(r, remaining));
+            }
+          }
+        }
+
+        rendering = false;
+
+        // If the stream already finished while we were rendering, resolve now
+        if (streamDone) {
           console.log(`[LLM] Stream complete: ${completedCount}/${textBlocks.length} blocks`);
+          if (streamError) {
+            reject(streamError);
+          } else {
+            resolve();
+          }
+        }
+      };
+
+      port.onMessage.addListener(message => {
+        if (message.type === 'reasoning') {
+          if (this.translationSettings.showProgress !== false) {
+            const seconds = (message.elapsed / 1000).toFixed(1);
+            const kChars = (message.chars / 1000).toFixed(0);
+            Animation.updateReasoningProgress(seconds, kChars, message.snippet);
+          }
+        } else if (message.type === 'block') {
+          blockQueue.push({ blockIndex: message.index, translatedBlock: message.block });
+          processQueue();
+        } else if (message.type === 'done') {
           port.disconnect();
-          resolve();
+          streamDone = true;
+          // If queue is empty and not rendering, resolve immediately
+          if (blockQueue.length === 0 && !rendering) {
+            console.log(`[LLM] Stream complete: ${completedCount}/${textBlocks.length} blocks`);
+            resolve();
+          }
+          // Otherwise processQueue will resolve when it drains
         } else if (message.type === 'error') {
           console.error('[LLM] Stream error:', message.error);
           port.disconnect();
 
           const error = new Error(message.error);
           error.isRetryable = message.isRetryable;
-          // Non-retryable errors (4xx) are fatal
           if (!message.isRetryable) {
             error.isFatalError = true;
           }
-          reject(error);
+
+          streamDone = true;
+          streamError = error;
+          if (blockQueue.length === 0 && !rendering) {
+            reject(error);
+          }
         }
       });
 
       port.onDisconnect.addListener(() => {
-        // If we haven't resolved yet, the port died unexpectedly
-        if (completedCount < textBlocks.length) {
+        if (completedCount < textBlocks.length && !streamDone) {
           const disconnectError = chrome.runtime.lastError;
           console.warn('[LLM] Port disconnected:', disconnectError?.message || 'unknown');
-          // Resolve anyway — partial translation is better than nothing
-          resolve();
+          streamDone = true;
+          if (blockQueue.length === 0 && !rendering) {
+            resolve();
+          }
         }
       });
 

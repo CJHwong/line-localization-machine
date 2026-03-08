@@ -54,6 +54,7 @@ class BackgroundScript {
       if (details.reason === 'install') {
         this.handleInstallation();
       } else if (details.reason === 'update') {
+        this.migrateSettings();
         console.log('Line Localization Machine updated');
       }
     });
@@ -85,8 +86,26 @@ class BackgroundScript {
     chrome.runtime.onConnect.addListener(port => {
       if (port.name !== 'streaming-translate') return;
 
+      // Abort the fetch when the port disconnects (page close/refresh/navigate)
+      const abortController = new AbortController();
+      let streamStarted = false;
+      port.onDisconnect.addListener(() => {
+        if (streamStarted) {
+          abortController.abort();
+          console.log('[Background] Port disconnected — aborting stream');
+        } else {
+          console.log('[Background] Port disconnected before stream started');
+        }
+      });
+
       port.onMessage.addListener(async message => {
         if (message.action !== 'START_STREAM') return;
+        streamStarted = true;
+
+        console.log(
+          '[Background] START_STREAM received, signal aborted:',
+          abortController.signal.aborted
+        );
 
         const { translationData, settings } = message;
 
@@ -113,6 +132,12 @@ class BackgroundScript {
           );
           const maxTokens = Math.min(64000, Math.max(4000, totalChars * 4));
 
+          // Throttle reasoning updates to avoid flooding the port.
+          // Buffer recent text so each update carries a meaningful snippet.
+          let lastReasoningUpdate = 0;
+          const REASONING_THROTTLE_MS = 300;
+          let reasoningTextBuffer = '';
+
           const result = await this.APIClient.streamTranslate(
             {
               apiKey: settings.apiKey,
@@ -124,6 +149,7 @@ class BackgroundScript {
               temperature: settings.temperature !== undefined ? settings.temperature : 0.3,
               maxTokens,
               reasoningEffort: settings.reasoningEffort || 'off',
+              signal: abortController.signal,
             },
             (blockIndex, block) => {
               try {
@@ -131,8 +157,30 @@ class BackgroundScript {
               } catch {
                 // Port disconnected mid-stream — user navigated away
               }
+            },
+            ({ chars, elapsed, text }) => {
+              reasoningTextBuffer += text;
+              // Keep only the tail — no point buffering megabytes
+              if (reasoningTextBuffer.length > 500) {
+                reasoningTextBuffer = reasoningTextBuffer.slice(-400);
+              }
+              const now = Date.now();
+              if (now - lastReasoningUpdate < REASONING_THROTTLE_MS) return;
+              lastReasoningUpdate = now;
+              try {
+                port.postMessage({
+                  type: 'reasoning',
+                  chars,
+                  elapsed,
+                  snippet: reasoningTextBuffer.slice(-250),
+                });
+              } catch {
+                // Port disconnected
+              }
             }
           );
+
+          if (abortController.signal.aborted) return; // Page gone, don't try to post
 
           if (result.success) {
             port.postMessage({ type: 'done', usage: result.usage, model: result.model });
@@ -183,6 +231,18 @@ class BackgroundScript {
 
     if (BrowserAPI.isFirefox) {
       addFirefoxSpecificListeners(this.translationStates, this.debug);
+    }
+  }
+
+  // ─── Migration ───────────────────────────────────────────────────────────
+
+  async migrateSettings() {
+    const stored = await chrome.storage.local.get('reasoningEffort');
+    // Migrate 'off' → 'low': 'off' meant "don't send the parameter" which
+    // let reasoning models burn unlimited thinking tokens on translation
+    if (!stored.reasoningEffort || stored.reasoningEffort === 'off') {
+      await chrome.storage.local.set({ reasoningEffort: 'low' });
+      console.log('Migrated reasoningEffort: off → low');
     }
   }
 

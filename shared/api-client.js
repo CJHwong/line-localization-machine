@@ -206,10 +206,11 @@ export default class APIClient {
    * @param {Object} config - API configuration (apiKey, apiEndpoint, model)
    * @param {Array} messages - Messages array
    * @param {Object} options - temperature, maxTokens, reasoningEffort
+   * @param {Function} [onReasoning] - Called with {chars, elapsed} during reasoning phase
    * @yields {string} Content delta strings
    */
-  static async *streamChatCompletion(config, messages, options = {}) {
-    const { temperature = 0.3, maxTokens = 2000, reasoningEffort = 'off' } = options;
+  static async *streamChatCompletion(config, messages, options = {}, onReasoning) {
+    const { temperature = 0.3, maxTokens = 2000, reasoningEffort = 'off', signal } = options;
 
     if (!config.apiKey) throw new Error('API key is required');
     if (!config.apiEndpoint) throw new Error('API endpoint is required');
@@ -230,14 +231,25 @@ export default class APIClient {
       requestBody.reasoning_effort = reasoningEffort;
     }
 
-    const response = await fetch(this.joinUrl(config.apiEndpoint, 'chat/completions'), {
+    console.log(
+      `[APIClient] stream request: model=${config.model}, ` +
+        `reasoning_effort=${reasoningEffort}, temp=${temperature}, maxTokens=${maxTokens}`
+    );
+
+    const fetchOptions = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify(requestBody),
-    });
+    };
+    if (signal) fetchOptions.signal = signal;
+
+    const response = await fetch(
+      this.joinUrl(config.apiEndpoint, 'chat/completions'),
+      fetchOptions
+    );
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -254,6 +266,10 @@ export default class APIClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let reasoningChars = 0;
+    let contentChars = 0;
+    let firstContentTime = 0;
+    const streamStartTime = Date.now();
 
     // Processes complete SSE lines, yielding content deltas
     const processLines = function* (lines) {
@@ -267,8 +283,32 @@ export default class APIClient {
           const payload = JSON.parse(trimmed.slice(6));
           const delta = payload.choices?.[0]?.delta;
           if (!delta) continue;
-          const content = delta.content || delta.reasoning || delta.reasoning_content;
-          if (content) yield content;
+
+          // Track reasoning tokens (not yielded — would corrupt JSON parser)
+          if (delta.reasoning_content || delta.reasoning) {
+            const text = delta.reasoning_content || delta.reasoning;
+            reasoningChars += text.length;
+            if (onReasoning) {
+              onReasoning({
+                chars: reasoningChars,
+                elapsed: Date.now() - streamStartTime,
+                text,
+              });
+            }
+          }
+
+          // Only yield actual content deltas
+          if (delta.content) {
+            if (!firstContentTime) {
+              firstContentTime = Date.now();
+              console.log(
+                `[APIClient] first content after ${firstContentTime - streamStartTime}ms ` +
+                  `(${reasoningChars} reasoning chars skipped)`
+              );
+            }
+            contentChars += delta.content.length;
+            yield delta.content;
+          }
         } catch {
           // Skip malformed SSE lines
         }
@@ -294,6 +334,11 @@ export default class APIClient {
       }
     } finally {
       reader.releaseLock();
+      const elapsed = Date.now() - streamStartTime;
+      console.log(
+        `[APIClient] stream done in ${elapsed}ms: ` +
+          `${contentChars} content chars, ${reasoningChars} reasoning chars skipped`
+      );
     }
   }
 
@@ -307,9 +352,10 @@ export default class APIClient {
    * @param {Object} translationData - { targetLanguage, blocks: [{id, items}] }
    * @param {Object} options - temperature, maxTokens, reasoningEffort
    * @param {Function} onBlock - Called with (blockIndex, blockObject) as each block completes
+   * @param {Function} [onReasoning] - Called with {chars, elapsed} during reasoning phase
    * @returns {Promise<Object>} { success, usage, model }
    */
-  static async streamTranslate(config, translationData, options = {}, onBlock) {
+  static async streamTranslate(config, translationData, options = {}, onBlock, onReasoning) {
     if (!translationData || !translationData.blocks || !Array.isArray(translationData.blocks)) {
       return {
         success: false,
@@ -347,26 +393,29 @@ Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"
 
     try {
       // Create an async iterable that yields content deltas from SSE
-      const rawDeltaStream = this.streamChatCompletion(config, messages, {
-        temperature: options.temperature !== undefined ? options.temperature : 0.3,
-        maxTokens: options.maxTokens || 16000,
-        reasoningEffort: options.reasoningEffort || 'off',
-      });
+      const rawDeltaStream = this.streamChatCompletion(
+        config,
+        messages,
+        {
+          temperature: options.temperature !== undefined ? options.temperature : 0.3,
+          maxTokens: options.maxTokens || 16000,
+          reasoningEffort: options.reasoningEffort || 'off',
+          signal: options.signal,
+        },
+        onReasoning
+      );
 
       // Wrap the delta stream to isolate the JSON object.
       // Some models wrap output in ```json fences or add preamble text.
       // We skip everything before the first '{' and stop after the
       // matching '}' so jsonriver only sees valid JSON.
-      const deltaStream = this.isolateJSON(rawDeltaStream);
+      const deltaStream = this.repairQuotes(this.isolateJSON(rawDeltaStream));
 
       // Track which blocks have been delivered to avoid duplicates
       const deliveredBlocks = new Set();
 
-      // Use jsonriver to parse the streamed JSON progressively
-      // completeCallback fires whenever a JSON value finishes parsing
       const completeCallback = (value, pathInfo) => {
         const segments = pathInfo.segments();
-        // We want path: blocks, <index> — meaning segments = ['blocks', N]
         if (
           segments.length === 2 &&
           segments[0] === 'blocks' &&
@@ -379,6 +428,10 @@ Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"
           const blockIndex = segments[1];
           if (!deliveredBlocks.has(blockIndex)) {
             deliveredBlocks.add(blockIndex);
+            console.log(
+              `[APIClient] block ${blockIndex}/${blocks.length} parsed ` +
+                `(${value.items.length} items)`
+            );
             onBlock(blockIndex, value);
           }
         }
@@ -408,8 +461,17 @@ Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"
         }
       }
 
+      console.log(
+        `[APIClient] streamTranslate: ${deliveredBlocks.size}/${blocks.length} blocks delivered`
+      );
       return { success: true };
     } catch (error) {
+      // Abort is expected when the user navigates away — not an error
+      if (error.name === 'AbortError') {
+        console.log('[APIClient] stream aborted (page closed/refreshed)');
+        return { success: false, error: 'aborted', errorType: 'aborted', isRetryable: false };
+      }
+
       console.error('[APIClient] streamTranslate error:', error.message);
 
       return {
@@ -513,6 +575,78 @@ Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"
 
       yield chunk;
     }
+  }
+
+  /**
+   * Streaming quote repair for malformed JSON from LLMs.
+   *
+   * Many models output bare " inside translated strings (e.g. "他說"你好"")
+   * which breaks JSON parsers. This generator escapes those bare quotes
+   * by checking the character AFTER each " while in a string:
+   *   - Structural char (,]}: or whitespace) → real closing quote
+   *   - Anything else → bare quote, escape as \"
+   *
+   * Uses a 1-char lookahead buffer across chunk boundaries.
+   *
+   * @param {AsyncIterable<string>} stream - JSON content stream
+   * @yields {string} Repaired JSON chunks
+   */
+  static async *repairQuotes(stream) {
+    const STRUCTURAL = new Set([',', ']', '}', ':', ' ', '\t', '\n', '\r']);
+    let inString = false;
+    let escaped = false;
+    let buffer = '';
+
+    for await (const chunk of stream) {
+      buffer += chunk;
+
+      // Process all but last char — need 1-char lookahead for quote detection
+      let output = '';
+      let i = 0;
+      while (i < buffer.length - 1) {
+        const ch = buffer[i];
+        const next = buffer[i + 1];
+
+        if (escaped) {
+          output += ch;
+          escaped = false;
+          i++;
+          continue;
+        }
+
+        if (ch === '\\' && inString) {
+          output += ch;
+          escaped = true;
+          i++;
+          continue;
+        }
+
+        if (ch === '"') {
+          if (!inString) {
+            inString = true;
+            output += ch;
+          } else if (STRUCTURAL.has(next)) {
+            // Next char is structural — this is a real closing quote
+            inString = false;
+            output += ch;
+          } else {
+            // Bare quote inside string — escape it
+            output += '\\"';
+          }
+          i++;
+          continue;
+        }
+
+        output += ch;
+        i++;
+      }
+
+      if (output) yield output;
+      buffer = buffer.slice(i);
+    }
+
+    // Flush remaining buffer (last char)
+    if (buffer) yield buffer;
   }
 
   /**
