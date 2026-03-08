@@ -27,7 +27,6 @@ const ModelConfig = {
     playSound: false,
     maxBlockSize: 5,
     temperature: 0.3,
-    blocksPerRequest: 5,
     reasoningEffort: 'off',
   },
 

@@ -192,79 +192,70 @@ class LineLocalizationMachine {
       Animation.showTranslationProgress();
     }
 
-    const blocksPerRequest = this.translationSettings.blocksPerRequest || 5;
+    // Start scanning animation on all blocks
+    textBlocks.forEach(block => {
+      try {
+        Animation.animateBlockStart(block);
+      } catch (error) {
+        console.warn('Error starting animation for block:', error);
+      }
+    });
+
+    // Build the full translation payload — all blocks in one request
+    const translationData = {
+      targetLanguage: this.getLanguageName(this.translationSettings.targetLanguage),
+      blocks: textBlocks.map((block, blockIndex) => ({
+        id: blockIndex,
+        items: block.map(item => item.textNodes.map(node => node.textContent)),
+      })),
+    };
+
+    console.log(
+      `[LLM] Streaming translation: ${textBlocks.length} blocks, ` +
+        `${translationData.blocks.reduce((s, b) => s + b.items.length, 0)} items`
+    );
+
+    // Open a long-lived port to background for streaming
+    const port = chrome.runtime.connect({ name: 'streaming-translate' });
     let completedCount = 0;
 
-    // Create batches
-    const batches = [];
-    for (let i = 0; i < textBlocks.length; i += blocksPerRequest) {
-      batches.push(textBlocks.slice(i, i + blocksPerRequest));
-    }
+    await new Promise((resolve, reject) => {
+      port.onMessage.addListener(async message => {
+        if (message.type === 'block') {
+          const blockIndex = message.index;
+          const translatedBlock = message.block;
+          const originalBlock = textBlocks[blockIndex];
 
-    // Pipeline processing: fire next batch request while animating current batch
-    let nextBatchPromise = null;
+          if (!originalBlock) {
+            console.warn(`[LLM] Received block ${blockIndex} but no matching original`);
+            return;
+          }
 
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
-      const nextBatch = batches[batchIndex + 1];
+          try {
+            let translatedItems = translatedBlock.items || [];
 
-      console.log(
-        `[LLM] Starting batch ${batchIndex}/${batches.length - 1}, ${batch.length} blocks`
-      );
+            // Pad or trim items to match block size
+            if (translatedItems.length < originalBlock.length) {
+              while (translatedItems.length < originalBlock.length) {
+                const fallbackItem = originalBlock[translatedItems.length];
+                translatedItems.push(fallbackItem.textNodes.map(n => n.textContent));
+              }
+            } else if (translatedItems.length > originalBlock.length) {
+              translatedItems = translatedItems.slice(0, originalBlock.length);
+            }
 
-      batch.forEach(block => {
-        try {
-          Animation.animateBlockStart(block);
-        } catch (error) {
-          console.warn('Error starting animation for block:', error);
-        }
-      });
+            // Coerce each item to an array of strings
+            translatedItems = translatedItems.map(segments => {
+              if (!Array.isArray(segments)) return [String(segments ?? '')];
+              return segments.map(s => String(s ?? ''));
+            });
 
-      // Get translation for current batch
-      let translationResult;
-      try {
-        if (batchIndex === 0 || !nextBatchPromise) {
-          console.log(`[LLM] Batch ${batchIndex}: Starting fresh translation request`);
-          const result = await this.translateMultipleBlocks(batch);
-          translationResult = { success: true, result };
-        } else {
-          console.log(`[LLM] Batch ${batchIndex}: Awaiting pending translation request`);
-          const result = await nextBatchPromise;
-          translationResult = { success: true, result };
-        }
-        console.log(
-          `[LLM] Batch ${batchIndex}: Got ${translationResult.result?.length || 0} translated blocks`
-        );
-      } catch (error) {
-        console.error(`[LLM] Batch ${batchIndex}: Translation error:`, error);
-        if (error.isFatalError) throw error;
-        translationResult = { success: false, error };
-      }
+            // Animate each item in the block
+            for (let k = 0; k < originalBlock.length; k++) {
+              const item = originalBlock[k];
+              const segments = translatedItems[k] || item.textNodes.map(n => n.textContent);
 
-      // Pipeline: start next batch request NOW (runs in parallel with animation below)
-      if (nextBatch) {
-        console.log(
-          `[LLM] Batch ${batchIndex}: Starting pipeline request for batch ${batchIndex + 1}`
-        );
-        nextBatchPromise = this.translateMultipleBlocks(nextBatch);
-      } else {
-        nextBatchPromise = null;
-      }
-
-      try {
-        if (translationResult.success) {
-          const batchTranslations = translationResult.result;
-
-          for (let j = 0; j < batch.length; j++) {
-            const block = batch[j];
-            const blockTranslations = batchTranslations[j] || block.map(item => item.originalText);
-
-            try {
-              // animateTranslation stores { originalHTML, translatedHTML } per element
-              for (let k = 0; k < block.length; k++) {
-                const item = block[k];
-                const segments = blockTranslations[k] || item.textNodes.map(n => n.textContent);
-
+              try {
                 const htmlPair = await Animation.animateLineTransition(
                   item,
                   segments,
@@ -272,148 +263,76 @@ class LineLocalizationMachine {
                   this.debug
                 );
                 this.translatedElements.set(item.element, htmlPair);
+              } catch (animationError) {
+                console.warn('Error animating item:', animationError);
               }
-            } catch (animationError) {
-              console.warn('Error animating block translation:', animationError);
             }
-
-            completedCount++;
-            this.completedBlocks = completedCount;
-            if (this.translationSettings.showProgress !== false) {
-              Animation.updateTranslationProgress(
-                completedCount,
-                textBlocks.length,
-                this.translationSettings
-              );
-            }
-            this.updateTranslationState({
-              isTranslating: true,
-              status: 'translating',
-              progress: Math.round((completedCount / textBlocks.length) * 100),
-              totalBlocks: textBlocks.length,
-              completedBlocks: completedCount,
-            });
-          }
-        } else {
-          console.warn('Batch translation failed:', translationResult.error);
-
-          if (translationResult.error && translationResult.error.isFatalError) {
-            console.error('Fatal error, stopping translation:', translationResult.error);
-            this.updateTranslationState({
-              isTranslating: false,
-              status: 'error',
-              error: translationResult.error.message,
-              errorType: translationResult.error.errorType,
-              progress: Math.round((completedCount / textBlocks.length) * 100),
-              totalBlocks: textBlocks.length,
-              completedBlocks: completedCount,
-            });
-            this.isTranslating = false;
-            if (this.translationSettings.showProgress !== false) {
-              Animation.hideTranslationProgress(this.translationSettings);
-            }
-            throw translationResult.error;
+          } catch (error) {
+            console.warn(`[LLM] Error processing block ${blockIndex}:`, error);
+            Animation.animateBlockError(originalBlock);
           }
 
-          // Non-fatal: show error animation and continue
-          this.handleBatchError(batch, completedCount, textBlocks.length);
-          completedCount += batch.length;
+          completedCount++;
           this.completedBlocks = completedCount;
+
+          if (this.translationSettings.showProgress !== false) {
+            Animation.updateTranslationProgress(
+              completedCount,
+              textBlocks.length,
+              this.translationSettings
+            );
+          }
+          this.updateTranslationState({
+            isTranslating: true,
+            status: 'translating',
+            progress: Math.round((completedCount / textBlocks.length) * 100),
+            totalBlocks: textBlocks.length,
+            completedBlocks: completedCount,
+          });
+
+          console.log(
+            `[LLM] Block ${blockIndex} rendered (${completedCount}/${textBlocks.length})`
+          );
+        } else if (message.type === 'done') {
+          console.log(`[LLM] Stream complete: ${completedCount}/${textBlocks.length} blocks`);
+          port.disconnect();
+          resolve();
+        } else if (message.type === 'error') {
+          console.error('[LLM] Stream error:', message.error);
+          port.disconnect();
+
+          const error = new Error(message.error);
+          error.isRetryable = message.isRetryable;
+          // Non-retryable errors (4xx) are fatal
+          if (!message.isRetryable) {
+            error.isFatalError = true;
+          }
+          reject(error);
         }
-      } catch (error) {
-        if (error.isFatalError) throw error;
-        console.warn('Unexpected batch error:', error);
-        this.handleBatchError(batch, completedCount, textBlocks.length);
-        completedCount += batch.length;
-        this.completedBlocks = completedCount;
-      }
-    }
+      });
+
+      port.onDisconnect.addListener(() => {
+        // If we haven't resolved yet, the port died unexpectedly
+        if (completedCount < textBlocks.length) {
+          const disconnectError = chrome.runtime.lastError;
+          console.warn('[LLM] Port disconnected:', disconnectError?.message || 'unknown');
+          // Resolve anyway — partial translation is better than nothing
+          resolve();
+        }
+      });
+
+      // Fire the stream
+      port.postMessage({
+        action: 'START_STREAM',
+        translationData,
+        settings: this.translationSettings,
+      });
+    });
 
     if (this.translationSettings.showProgress !== false) {
       Animation.hideTranslationProgress(this.translationSettings);
     }
     Animation.addGlobalToggleButton(this.translatedElements, this.translationSettings);
-  }
-
-  handleBatchError(batch, completedCount, totalBlocks) {
-    batch.forEach(block => {
-      Animation.animateBlockError(block);
-      completedCount++;
-      this.completedBlocks = completedCount;
-      Animation.updateTranslationProgress(completedCount, totalBlocks, this.translationSettings);
-      this.updateTranslationState({
-        isTranslating: true,
-        status: 'translating',
-        progress: Math.round((completedCount / totalBlocks) * 100),
-        totalBlocks,
-        completedBlocks: completedCount,
-      });
-    });
-  }
-
-  // ─── API Communication ─────────────────────────────────────────────────────
-
-  async translateMultipleBlocks(blocks) {
-    const translationData = {
-      targetLanguage: this.getLanguageName(this.translationSettings.targetLanguage),
-      blocks: blocks.map((block, blockIndex) => ({
-        id: blockIndex,
-        items: block.map(item => item.textNodes.map(node => node.textContent)),
-      })),
-    };
-
-    if (this.debug) {
-      console.log('Translation request:', {
-        blockCount: blocks.length,
-        totalItems: translationData.blocks.reduce((sum, b) => sum + b.items.length, 0),
-      });
-    }
-
-    try {
-      const result = await this.callTranslationAPI(translationData);
-
-      if (!result.success || !result.blocks) {
-        throw new Error(result.error || 'Translation failed - no blocks returned');
-      }
-
-      const results = [];
-      for (let i = 0; i < blocks.length; i++) {
-        const originalBlock = blocks[i];
-        const translatedBlock = result.blocks.find(b => b.id === i) || result.blocks[i];
-
-        if (!translatedBlock || !translatedBlock.items) {
-          console.warn(`Missing translation for block ${i}, using original`);
-          results.push(originalBlock.map(item => item.textNodes.map(n => n.textContent)));
-          continue;
-        }
-
-        let translatedItems = translatedBlock.items;
-
-        // Pad or trim items to match block size
-        if (translatedItems.length < originalBlock.length) {
-          while (translatedItems.length < originalBlock.length) {
-            const fallbackItem = originalBlock[translatedItems.length];
-            translatedItems.push(fallbackItem.textNodes.map(n => n.textContent));
-          }
-        } else if (translatedItems.length > originalBlock.length) {
-          translatedItems = translatedItems.slice(0, originalBlock.length);
-        }
-
-        // Coerce each item to an array of strings
-        translatedItems = translatedItems.map(segments => {
-          if (!Array.isArray(segments)) return [String(segments ?? '')];
-          return segments.map(s => String(s ?? ''));
-        });
-
-        results.push(translatedItems);
-      }
-
-      return results;
-    } catch (error) {
-      if (error.isFatalError) throw error;
-      console.error('Batch translation error:', error);
-      return blocks.map(block => block.map(item => item.textNodes.map(n => n.textContent)));
-    }
   }
 
   getLanguageName(languageCode) {
@@ -435,57 +354,6 @@ class LineLocalizationMachine {
       norwegian: 'Norwegian',
     };
     return languageMap[languageCode] || languageCode;
-  }
-
-  async callTranslationAPI(translationData) {
-    if (!translationData || !translationData.blocks || translationData.blocks.length === 0) {
-      return { success: false, error: 'No translation data provided' };
-    }
-
-    try {
-      if (this.debug) {
-        console.log('Translation request via background script:', {
-          model: this.translationSettings.model,
-          targetLanguage: translationData.targetLanguage,
-          blockCount: translationData.blocks.length,
-          totalItems: translationData.blocks.reduce((sum, b) => sum + b.items.length, 0),
-        });
-      }
-
-      const result = await chrome.runtime.sendMessage({
-        action: 'TRANSLATE_REQUEST',
-        translationData,
-        settings: this.translationSettings,
-      });
-
-      if (!result || !result.success) {
-        let errorMessage = 'Translation failed';
-        if (result && result.error) {
-          errorMessage = typeof result.error === 'string' ? result.error : result.error.toString();
-        }
-        const error = new Error(errorMessage);
-        if (result && result.errorType) error.errorType = result.errorType;
-        if (result && result.errorStatus) error.status = result.errorStatus;
-        if (
-          result &&
-          (result.isRetryable === false || (result.errorStatus >= 400 && result.errorStatus < 500))
-        ) {
-          error.isFatalError = true;
-        }
-        throw error;
-      }
-
-      return {
-        success: true,
-        blocks: result.blocks,
-        usage: result.usage,
-        model: result.model,
-      };
-    } catch (error) {
-      console.error('Translation API call failed:', error);
-      if (error.isFatalError || error.errorType) throw error;
-      throw new Error(`Translation failed: ${error.message}`);
-    }
   }
 
   // ─── State Management ──────────────────────────────────────────────────────

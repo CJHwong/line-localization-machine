@@ -81,6 +81,83 @@ class BackgroundScript {
       this.handleActionClick(tab);
     });
 
+    // ─── Streaming translation via long-lived port ──────────────────────────
+    chrome.runtime.onConnect.addListener(port => {
+      if (port.name !== 'streaming-translate') return;
+
+      port.onMessage.addListener(async message => {
+        if (message.action !== 'START_STREAM') return;
+
+        const { translationData, settings } = message;
+
+        if (!translationData?.blocks || !Array.isArray(translationData.blocks)) {
+          port.postMessage({
+            type: 'error',
+            error: 'Invalid translation data: missing blocks array',
+            isRetryable: false,
+          });
+          return;
+        }
+
+        try {
+          const totalChars = translationData.blocks.reduce(
+            (sum, b) =>
+              sum +
+              b.items.reduce(
+                (s, item) =>
+                  s +
+                  (Array.isArray(item) ? item.reduce((c, seg) => c + String(seg).length, 0) : 0),
+                0
+              ),
+            0
+          );
+          const maxTokens = Math.min(64000, Math.max(4000, totalChars * 4));
+
+          const result = await this.APIClient.streamTranslate(
+            {
+              apiKey: settings.apiKey,
+              apiEndpoint: settings.apiEndpoint,
+              model: settings.model,
+            },
+            translationData,
+            {
+              temperature: settings.temperature !== undefined ? settings.temperature : 0.3,
+              maxTokens,
+              reasoningEffort: settings.reasoningEffort || 'off',
+            },
+            (blockIndex, block) => {
+              try {
+                port.postMessage({ type: 'block', index: blockIndex, block });
+              } catch {
+                // Port disconnected mid-stream — user navigated away
+              }
+            }
+          );
+
+          if (result.success) {
+            port.postMessage({ type: 'done', usage: result.usage, model: result.model });
+          } else {
+            port.postMessage({
+              type: 'error',
+              error: result.error,
+              isRetryable: result.isRetryable || false,
+            });
+          }
+        } catch (error) {
+          console.error('Streaming translation error:', error);
+          try {
+            port.postMessage({
+              type: 'error',
+              error: error.message || 'Unknown streaming error',
+              isRetryable: error.isRetryable || false,
+            });
+          } catch {
+            // Port already disconnected
+          }
+        }
+      });
+    });
+
     chrome.tabs.onRemoved.addListener(tabId => {
       this.translationStates.delete(tabId);
       console.log(`Cleaned up translation state for closed tab ${tabId}`);
@@ -128,9 +205,6 @@ class BackgroundScript {
   async handleMessage(message, sender) {
     try {
       switch (message.action) {
-        case 'TRANSLATE_REQUEST':
-          return await this.handleTranslationRequest(message);
-
         case 'GET_SETTINGS':
           return await this.getSettings();
 
@@ -241,93 +315,6 @@ class BackgroundScript {
           message: 'Failed to start translation. Please try again.',
         });
       }
-    }
-  }
-
-  // ─── Translation Request ───────────────────────────────────────────────────
-
-  async handleTranslationRequest(message) {
-    const { translationData, settings } = message;
-
-    if (!translationData || !translationData.blocks || !Array.isArray(translationData.blocks)) {
-      return {
-        success: false,
-        error: 'Invalid translation data: missing blocks array',
-        errorType: 'client_error',
-        isRetryable: false,
-      };
-    }
-
-    try {
-      const totalChars = translationData.blocks.reduce(
-        (sum, b) =>
-          sum +
-          b.items.reduce(
-            (s, item) =>
-              s + (Array.isArray(item) ? item.reduce((c, seg) => c + String(seg).length, 0) : 0),
-            0
-          ),
-        0
-      );
-      const maxTokens = Math.min(16000, Math.max(2000, totalChars * 4));
-      // Scale timeout: 30s base + 10s per 1000 chars, capped at 180s
-      const timeout = Math.min(180000, 30000 + Math.ceil(totalChars / 1000) * 10000);
-
-      const result = await this.APIClient.translate(
-        {
-          apiKey: settings.apiKey,
-          apiEndpoint: settings.apiEndpoint,
-          model: settings.model,
-        },
-        translationData,
-        {
-          temperature: settings.temperature !== undefined ? settings.temperature : 0.3,
-          maxTokens,
-          timeout,
-          reasoningEffort: settings.reasoningEffort || 'off',
-        }
-      );
-
-      if (result.success) {
-        return {
-          success: true,
-          blocks: result.blocks,
-          usage: result.usage,
-          model: result.model,
-        };
-      } else {
-        return {
-          success: false,
-          error: result.error,
-          errorType: result.errorType,
-          errorStatus: result.errorStatus,
-          isRetryable: result.isRetryable,
-          apiMessage: result.apiMessage,
-          retryAfter: result.retryAfter,
-        };
-      }
-    } catch (error) {
-      console.error('Translation API error:', error);
-
-      let errorMessage = 'Unknown error occurred';
-      if (error && typeof error.message === 'string') {
-        errorMessage = error.message;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
-      } else if (error && error.toString) {
-        try {
-          errorMessage = error.toString();
-        } catch (e) {
-          errorMessage = 'Error could not be serialized';
-        }
-      }
-
-      return {
-        success: false,
-        error: errorMessage,
-        errorType: error.type || error.errorType || 'unknown',
-        isRetryable: error.isRetryable || false,
-      };
     }
   }
 

@@ -18,7 +18,6 @@ class SettingsController {
       maxBlockSize: document.getElementById('maxBlockSize'),
       temperature: document.getElementById('temperature'),
       reasoningEffort: document.getElementById('reasoningEffort'),
-      blocksPerRequest: document.getElementById('blocksPerRequest'),
       toggleApiKey: document.getElementById('toggleApiKey'),
       testConnection: document.getElementById('testConnection'),
       saveSettings: document.getElementById('saveSettings'),
@@ -89,7 +88,6 @@ class SettingsController {
         this.elements.temperature.value = tempValue.toString();
       }
       this.elements.reasoningEffort.value = mergedSettings.reasoningEffort || 'off';
-      this.elements.blocksPerRequest.value = mergedSettings.blocksPerRequest.toString();
 
       // Handle model selection
       if (ModelConfig.isPredefinedModel(mergedSettings.model)) {
@@ -145,7 +143,6 @@ class SettingsController {
       this.elements.maxBlockSize,
       this.elements.temperature,
       this.elements.reasoningEffort,
-      this.elements.blocksPerRequest,
     ];
 
     autoSaveElements.forEach(element => {
@@ -190,7 +187,6 @@ class SettingsController {
         maxBlockSize: parseInt(this.elements.maxBlockSize.value),
         temperature: parseFloat(this.elements.temperature.value),
         reasoningEffort: this.elements.reasoningEffort.value,
-        blocksPerRequest: parseInt(this.elements.blocksPerRequest.value),
       };
 
       await chrome.storage.local.set(settings);
