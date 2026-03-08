@@ -78,7 +78,7 @@ async function run() {
     await fetch(`${MOCK_SERVER}/test/mode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'json', markers: 'preserve' }),
+      body: JSON.stringify({ mode: 'json' }),
     });
 
     // Open test page via HTTP

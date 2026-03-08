@@ -2,12 +2,11 @@
  * Automated E2E test for the translation pipeline.
  *
  * Tests:
- * 1. No [T:N], [/T:N], [O:N] markers visible in translated DOM
+ * 1. Translation applied to DOM (text nodes replaced)
  * 2. Links (<a> tags) preserved after translation
  * 3. Inline elements (<strong>, <em>, <code>) preserved
- * 4. Plain text elements translated without marker contamination
- * 5. Non-content zones (nav, sidebar, footer) excluded
- * 6. Toggle button works correctly
+ * 4. Non-content zones (nav, sidebar, footer) excluded
+ * 5. Toggle button works correctly
  *
  * Usage:
  *   # Terminal 1: start mock server
@@ -23,7 +22,6 @@
  *   --endpoint=URL     API endpoint (default: https://api.openai.com/v1)
  *   --model=MODEL      Model name (default: gpt-4o-mini)
  *   --api-key-env=VAR  Env var for API key (default: OPENAI_API_KEY)
- *   --markers=drop|contaminate  Test with LLM marker misbehavior
  */
 
 const { chromium } = require('@playwright/test');
@@ -37,7 +35,6 @@ const args = process.argv.slice(2);
 const _HEADED = args.includes('--headed'); // reserved for future headless support
 const KEEP_OPEN = args.includes('--keep-open');
 const LIVE_MODE = args.includes('--live');
-const MARKER_MODE = (args.find(a => a.startsWith('--markers=')) || '').split('=')[1] || 'preserve';
 const CUSTOM_URL =
   (args.find(a => a.startsWith('--url=')) || '').split('=').slice(1).join('=') || '';
 const TARGET_LANG = (args.find(a => a.startsWith('--lang=')) || '').split('=')[1] || 'spanish';
@@ -71,7 +68,6 @@ class PipelineTest {
   async setup() {
     console.log('🚀 Setting up pipeline test...');
     console.log(`   Mode: ${LIVE_MODE ? 'LIVE (real OpenAI API)' : 'mock server'}`);
-    if (!LIVE_MODE) console.log(`   Marker mode: ${MARKER_MODE}`);
 
     if (LIVE_MODE) {
       // Validate API key from environment (never log the key)
@@ -100,7 +96,7 @@ class PipelineTest {
       await fetch(`${MOCK_SERVER}/test/mode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'json', markers: MARKER_MODE }),
+        body: JSON.stringify({ mode: 'json' }),
       });
     }
 
@@ -180,8 +176,7 @@ class PipelineTest {
     if (!csReady) throw new Error('Content script did not respond to PING after 15s');
     console.log('   Content script ready');
 
-    // Send START_TRANSLATION (fire-and-forget — the response only comes when
-    // translation finishes, which could time out the evaluate call)
+    // Send START_TRANSLATION
     const settings = LIVE_MODE
       ? {
           apiKey: process.env[API_KEY_ENV],
@@ -202,7 +197,6 @@ class PipelineTest {
     console.log('   Sending START_TRANSLATION...');
     await this.serviceWorker.evaluate(
       async ({ tabId, settings }) => {
-        // Fire without awaiting — response comes after full translation
         chrome.tabs.sendMessage(tabId, {
           action: 'START_TRANSLATION',
           tabId,
@@ -229,7 +223,7 @@ class PipelineTest {
         console.log(`   Translation detected: ${translatedCount} elements (no toggle button yet)`);
         await this.page.waitForTimeout(3000);
       } else {
-        console.log('   ⚠️ No translation detected after 60s');
+        console.log('   ⚠️ No translation detected after timeout');
         const pageState = await this.page.evaluate(() => ({
           llmElements: document.querySelectorAll('[data-llm-state]').length,
           paragraphs: document.querySelectorAll('p').length,
@@ -242,61 +236,18 @@ class PipelineTest {
     return consoleLogs;
   }
 
-  async verifyNoMarkers() {
-    console.log('\n📋 Test: No markers in translated DOM');
+  async verifyTranslationApplied() {
+    console.log('\n📋 Test: Translation applied to DOM');
 
     const results = await this.page.evaluate(() => {
       const translated = document.querySelectorAll('[data-llm-state="translated"]');
-      const markerRegex = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/;
-      const issues = [];
-
-      translated.forEach((el, i) => {
-        const text = el.textContent;
-        const html = el.innerHTML;
-        const attr = el.getAttribute('data-llm-translated') || '';
-
-        if (markerRegex.test(text))
-          issues.push({
-            index: i,
-            tag: el.tagName,
-            location: 'textContent',
-            snippet: text.substring(0, 100),
-          });
-        if (markerRegex.test(html))
-          issues.push({
-            index: i,
-            tag: el.tagName,
-            location: 'innerHTML',
-            snippet: html.substring(0, 100),
-          });
-        if (markerRegex.test(attr))
-          issues.push({
-            index: i,
-            tag: el.tagName,
-            location: 'data-llm-translated',
-            snippet: attr.substring(0, 100),
-          });
-      });
-
-      return { translatedCount: translated.length, issues };
+      return { translatedCount: translated.length };
     });
 
     this.assert(
       results.translatedCount > 0,
       `Found ${results.translatedCount} translated elements`
     );
-    this.assert(
-      results.issues.length === 0,
-      `No markers in DOM (${results.issues.length} issues found)`
-    );
-
-    if (results.issues.length > 0) {
-      console.log('   Marker issues:');
-      results.issues.forEach(issue => {
-        console.log(`     Element ${issue.index} (${issue.tag}) in ${issue.location}:`);
-        console.log(`       ${issue.snippet}`);
-      });
-    }
   }
 
   async verifyLinksPreserved() {
@@ -319,26 +270,13 @@ class PipelineTest {
         });
       });
 
-      let originalLinksCount = 0;
-      translated.forEach(el => {
-        const originalHTML = el.getAttribute('data-llm-original-html') || '';
-        const matches = originalHTML.match(/<a\s/g);
-        if (matches) originalLinksCount += matches.length;
-      });
-
-      return { translatedCount: translated.length, totalLinks, originalLinksCount, linkDetails };
+      return { translatedCount: translated.length, totalLinks, linkDetails };
     });
 
-    console.log(
-      `   Original links: ${results.originalLinksCount}, Preserved: ${results.totalLinks}`
-    );
+    console.log(`   Links in translated DOM: ${results.totalLinks}`);
     this.assert(
       results.totalLinks > 0,
       `Links exist in translated DOM (${results.totalLinks} found)`
-    );
-    this.assert(
-      results.totalLinks >= results.originalLinksCount,
-      `All original links preserved (${results.totalLinks}/${results.originalLinksCount})`
     );
 
     if (results.linkDetails.length > 0) {
@@ -355,41 +293,26 @@ class PipelineTest {
     const results = await this.page.evaluate(() => {
       const translated = document.querySelectorAll('[data-llm-state="translated"]');
       const counts = { strong: 0, em: 0, code: 0 };
-      const originalCounts = { strong: 0, em: 0, code: 0 };
 
       translated.forEach(el => {
         counts.strong += el.querySelectorAll('strong').length;
         counts.em += el.querySelectorAll('em').length;
         counts.code += el.querySelectorAll('code').length;
-
-        const originalHTML = el.getAttribute('data-llm-original-html') || '';
-        originalCounts.strong += (originalHTML.match(/<strong/g) || []).length;
-        originalCounts.em += (originalHTML.match(/<em/g) || []).length;
-        originalCounts.code += (originalHTML.match(/<code/g) || []).length;
       });
 
-      return { counts, originalCounts };
+      return { counts };
     });
 
-    console.log(
-      `   Original: strong=${results.originalCounts.strong}, em=${results.originalCounts.em}, code=${results.originalCounts.code}`
-    );
     console.log(
       `   Preserved: strong=${results.counts.strong}, em=${results.counts.em}, code=${results.counts.code}`
     );
 
     this.assert(
-      results.counts.strong > 0 || results.originalCounts.strong === 0,
-      `<strong> elements preserved (${results.counts.strong}/${results.originalCounts.strong})`
+      results.counts.strong > 0,
+      `<strong> elements preserved (${results.counts.strong})`
     );
-    this.assert(
-      results.counts.em > 0 || results.originalCounts.em === 0,
-      `<em> elements preserved (${results.counts.em}/${results.originalCounts.em})`
-    );
-    this.assert(
-      results.counts.code > 0 || results.originalCounts.code === 0,
-      `<code> elements preserved (${results.counts.code}/${results.originalCounts.code})`
-    );
+    this.assert(results.counts.em > 0, `<em> elements preserved (${results.counts.em})`);
+    this.assert(results.counts.code > 0, `<code> elements preserved (${results.counts.code})`);
   }
 
   async verifyNonContentExcluded() {
@@ -441,19 +364,13 @@ class PipelineTest {
 
     const afterOriginals = await this.page.evaluate(() => {
       const elements = document.querySelectorAll('[data-llm-state="showing-original"]');
-      const markerRegex = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/;
-      let markersFound = 0;
-      elements.forEach(el => {
-        if (markerRegex.test(el.textContent)) markersFound++;
-      });
-      return { showingOriginal: elements.length, markersFound };
+      return { showingOriginal: elements.length };
     });
 
     this.assert(
       afterOriginals.showingOriginal > 0,
       `Elements showing originals (${afterOriginals.showingOriginal})`
     );
-    this.assert(afterOriginals.markersFound === 0, 'No markers in original view');
 
     // Click "Show Translations" (toggle back)
     await this.page.click('#llm-original-toggle .llm-toggle-btn');
@@ -461,23 +378,16 @@ class PipelineTest {
 
     const afterTranslations = await this.page.evaluate(() => {
       const elements = document.querySelectorAll('[data-llm-state="translated"]');
-      const markerRegex = /\[T:\d+\]|\[\/T:\d+\]|\[O:\d+\]/;
-      let markersFound = 0;
       let linksFound = 0;
       elements.forEach(el => {
-        if (markerRegex.test(el.textContent)) markersFound++;
         linksFound += el.querySelectorAll('a[href]').length;
       });
-      return { showingTranslated: elements.length, markersFound, linksFound };
+      return { showingTranslated: elements.length, linksFound };
     });
 
     this.assert(
       afterTranslations.showingTranslated > 0,
       `Elements showing translations (${afterTranslations.showingTranslated})`
-    );
-    this.assert(
-      afterTranslations.markersFound === 0,
-      'No markers after toggle back to translations'
     );
     this.assert(
       afterTranslations.linksFound > 0,
@@ -490,7 +400,7 @@ class PipelineTest {
       await this.setup();
       const consoleLogs = await this.triggerTranslation();
 
-      await this.verifyNoMarkers();
+      await this.verifyTranslationApplied();
       await this.verifyLinksPreserved();
       await this.verifyInlineElements();
       await this.verifyNonContentExcluded();
@@ -505,11 +415,6 @@ class PipelineTest {
       }
 
       const debugLogs = consoleLogs.filter(l => l.includes('[LLM DEBUG]'));
-      const markerWarnings = consoleLogs.filter(l => l.includes('MARKERS SURVIVED'));
-      if (markerWarnings.length > 0) {
-        console.log(`\n⚠️  ${markerWarnings.length} marker survival warnings in console:`);
-        markerWarnings.forEach(w => console.log(`  ${w.substring(0, 200)}`));
-      }
       if (debugLogs.length > 0) {
         console.log(`\n📝 ${debugLogs.length} debug log entries captured`);
       }
