@@ -16,7 +16,7 @@ rm -rf "$PACKAGE_DIR" "$ROOT_DIR/$ZIP_NAME"
 mkdir -p "$PACKAGE_DIR"
 
 echo "[Firefox] Copying extension files..."
-cp -R assets background content popup settings shared "$PACKAGE_DIR/"
+cp -R assets background content popup settings shared vendor "$PACKAGE_DIR/"
 cp manifest.json "$PACKAGE_DIR/"
 
 MANIFEST="$PACKAGE_DIR/manifest.json"

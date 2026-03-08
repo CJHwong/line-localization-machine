@@ -16,7 +16,7 @@ rm -rf "$PACKAGE_DIR" "$ROOT_DIR/$ZIP_NAME"
 mkdir -p "$PACKAGE_DIR"
 
 echo "[Chrome] Copying extension files..."
-cp -R assets background content popup settings shared "$PACKAGE_DIR/"
+cp -R assets background content popup settings shared vendor "$PACKAGE_DIR/"
 cp manifest.json "$PACKAGE_DIR/"
 
 echo "[Chrome] Creating zip archive: $ZIP_NAME"
