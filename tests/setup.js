@@ -8,7 +8,6 @@ global.chrome = {
           apiEndpoint: 'https://api.openai.com/v1/chat/completions',
           model: 'gpt-4',
           targetLanguage: 'es',
-          blocksPerRequest: 5,
           temperature: 0.3,
         };
         if (callback) callback(mockData);
@@ -26,6 +25,12 @@ global.chrome = {
   },
   runtime: {
     sendMessage: jest.fn(() => Promise.resolve({ success: true })),
+    connect: jest.fn(() => ({
+      postMessage: jest.fn(),
+      onMessage: { addListener: jest.fn() },
+      onDisconnect: { addListener: jest.fn() },
+      disconnect: jest.fn(),
+    })),
     onMessage: {
       addListener: jest.fn(),
     },

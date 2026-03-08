@@ -62,7 +62,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
   }
 
-  const { messages, model } = req.body;
+  const { messages, model, stream } = req.body;
 
   // Extract text to translate from the last user message
   const userMessage = messages.find(m => m.role === 'user');
@@ -106,8 +106,43 @@ app.post('/v1/chat/completions', async (req, res) => {
       .join('\n');
   }
 
-  console.log(`[Mock] Request #${requestCount} (mode=${translationMode})`);
+  console.log(`[Mock] Request #${requestCount} (mode=${translationMode}, stream=${!!stream})`);
 
+  // ─── Streaming SSE response ───────────────────────────────────────────────
+  if (stream) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    // Split the translation into realistic chunks (roughly 10-30 chars each)
+    const chunks = [];
+    for (let i = 0; i < mockTranslation.length; i += 20) {
+      chunks.push(mockTranslation.slice(i, i + 20));
+    }
+
+    for (const chunk of chunks) {
+      const ssePayload = JSON.stringify({
+        id: `mock-${Date.now()}`,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: model || 'gpt-4',
+        choices: [
+          {
+            index: 0,
+            delta: { content: chunk },
+            finish_reason: null,
+          },
+        ],
+      });
+      res.write(`data: ${ssePayload}\n\n`);
+    }
+
+    res.write('data: [DONE]\n\n');
+    res.end();
+    return;
+  }
+
+  // ─── Non-streaming response ─────────────────────────────────────────────
   res.json({
     id: `mock-${Date.now()}`,
     object: 'chat.completion',
