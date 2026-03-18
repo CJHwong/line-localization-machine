@@ -323,7 +323,8 @@ small {
   font-style: italic;
 }
 
-/* ── Custom model section ── */
+/* ── Conditional reveal sections ── */
+#customEndpointSection,
 #customModelSection {
   background: var(--warm-50);
   border: 1px solid var(--border);

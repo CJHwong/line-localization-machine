@@ -6,8 +6,10 @@ import APIClient from '../shared/api-client.js';
 class SettingsController {
   constructor() {
     this.elements = {
+      provider: document.getElementById('provider'),
       apiKey: document.getElementById('apiKey'),
       apiEndpoint: document.getElementById('apiEndpoint'),
+      customEndpointSection: document.getElementById('customEndpointSection'),
       model: document.getElementById('model'),
       customModel: document.getElementById('customModel'),
       customModelSection: document.getElementById('customModelSection'),
@@ -26,53 +28,69 @@ class SettingsController {
   }
 
   async init() {
-    this.populateModelOptions();
+    this.populateProviderOptions();
     await this.loadSettings();
     this.bindEvents();
+    this.updateProviderSection();
     this.updateModelSection();
   }
 
-  populateModelOptions() {
-    const modelSelect = this.elements.model;
+  populateProviderOptions() {
+    const providerSelect = this.elements.provider;
+    providerSelect.innerHTML = '';
 
-    // Clear existing options except custom
-    const customOption = modelSelect.querySelector('option[value="custom"]');
+    ModelConfig.getProviderIds().forEach(providerId => {
+      const provider = ModelConfig.getProvider(providerId);
+      const option = document.createElement('option');
+      option.value = providerId;
+      option.textContent = provider.name;
+      providerSelect.appendChild(option);
+    });
+  }
+
+  populateModelOptions(providerId) {
+    const modelSelect = this.elements.model;
     modelSelect.innerHTML = '';
 
-    // Add predefined models
-    ModelConfig.PREDEFINED_MODELS.forEach(modelId => {
+    const models = ModelConfig.getModelsForProvider(providerId);
+    models.forEach(modelId => {
       const option = document.createElement('option');
       option.value = modelId;
-      option.textContent = ModelConfig.getModelDescription(modelId);
+      option.textContent = ModelConfig.getModelDescription(providerId, modelId);
       modelSelect.appendChild(option);
     });
 
-    // Add custom option at the end
+    // Always add custom option at the end
+    const customOption = document.createElement('option');
+    customOption.value = 'custom';
+    customOption.textContent = 'Custom Model...';
     modelSelect.appendChild(customOption);
   }
 
   async loadSettings() {
     try {
       const settings = await chrome.storage.local.get(Object.keys(this.defaultSettings));
+      const migrated = ModelConfig.migrateSettings({ ...this.defaultSettings, ...settings });
 
-      // Merge with defaults
-      const mergedSettings = { ...this.defaultSettings, ...settings };
+      this.elements.provider.value = migrated.provider;
+      this.elements.apiKey.value = migrated.apiKey;
+      this.elements.apiEndpoint.value = migrated.apiEndpoint;
+      this.elements.customModel.value = migrated.customModel;
+      this.elements.targetLanguage.value = migrated.targetLanguage;
+      this.elements.reasoningEffort.value = migrated.reasoningEffort || 'medium';
 
-      // Apply settings to form elements
-      this.elements.apiKey.value = mergedSettings.apiKey;
-      this.elements.apiEndpoint.value = mergedSettings.apiEndpoint;
-      this.elements.customModel.value = mergedSettings.customModel;
-      this.elements.targetLanguage.value = mergedSettings.targetLanguage;
-      this.elements.reasoningEffort.value = mergedSettings.reasoningEffort || 'off';
+      // Populate models for the selected provider
+      this.populateModelOptions(migrated.provider);
 
       // Handle model selection
-      if (ModelConfig.isPredefinedModel(mergedSettings.model)) {
-        this.elements.model.value = mergedSettings.model;
-      } else {
+      if (ModelConfig.isPredefinedModel(migrated.provider, migrated.model)) {
+        this.elements.model.value = migrated.model;
+      } else if (migrated.model && migrated.model !== '') {
         this.elements.model.value = 'custom';
-        this.elements.customModel.value = mergedSettings.model;
+        this.elements.customModel.value = migrated.model;
       }
 
+      this.updateProviderSection();
       this.updateModelSection();
     } catch (error) {
       this.showStatus('Error loading settings', 'error');
@@ -81,6 +99,24 @@ class SettingsController {
   }
 
   bindEvents() {
+    // Provider change — swap model list and toggle endpoint visibility
+    this.elements.provider.addEventListener('change', () => {
+      const providerId = this.elements.provider.value;
+      const provider = ModelConfig.getProvider(providerId);
+
+      this.populateModelOptions(providerId);
+
+      // Set the provider's default model
+      if (provider.defaultModel) {
+        this.elements.model.value = provider.defaultModel;
+      } else {
+        this.elements.model.value = 'custom';
+      }
+
+      this.updateProviderSection();
+      this.updateModelSection();
+    });
+
     // Model selection change
     this.elements.model.addEventListener('change', () => {
       this.updateModelSection();
@@ -109,6 +145,7 @@ class SettingsController {
     // Auto-save on input changes (with debouncing)
     let saveTimeout;
     const autoSaveElements = [
+      this.elements.provider,
       this.elements.apiKey,
       this.elements.apiEndpoint,
       this.elements.customModel,
@@ -117,12 +154,18 @@ class SettingsController {
     ];
 
     autoSaveElements.forEach(element => {
-      const eventType = element.type === 'checkbox' ? 'change' : 'input';
+      const eventType = element.tagName === 'SELECT' ? 'change' : 'input';
       element.addEventListener(eventType, () => {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => this.saveSettings(true), 1000);
       });
     });
+  }
+
+  updateProviderSection() {
+    const providerId = this.elements.provider.value;
+    const isCustom = providerId === 'custom';
+    this.elements.customEndpointSection.style.display = isCustom ? 'block' : 'none';
   }
 
   updateModelSection() {
@@ -134,21 +177,38 @@ class SettingsController {
     }
   }
 
+  getResolvedEndpoint() {
+    const providerId = this.elements.provider.value;
+    return ModelConfig.resolveEndpoint(providerId, this.elements.apiEndpoint.value.trim());
+  }
+
+  getResolvedModel() {
+    return this.elements.model.value === 'custom'
+      ? this.elements.customModel.value.trim()
+      : this.elements.model.value;
+  }
+
   async saveSettings(silent = false) {
     try {
-      const actualModel =
-        this.elements.model.value === 'custom'
-          ? this.elements.customModel.value.trim()
-          : this.elements.model.value;
+      const actualModel = this.getResolvedModel();
+      const providerId = this.elements.provider.value;
 
       if (this.elements.model.value === 'custom' && !actualModel) {
         this.showStatus('Please enter a custom model ID', 'error');
         return;
       }
 
+      if (providerId === 'custom' && !this.elements.apiEndpoint.value.trim()) {
+        if (!silent) {
+          this.showStatus('Please enter an API endpoint', 'error');
+        }
+        return;
+      }
+
       const settings = {
+        provider: providerId,
         apiKey: this.elements.apiKey.value.trim(),
-        apiEndpoint: this.elements.apiEndpoint.value.trim() || this.defaultSettings.apiEndpoint,
+        apiEndpoint: this.getResolvedEndpoint(),
         model: actualModel,
         customModel: this.elements.customModel.value.trim(),
         targetLanguage: this.elements.targetLanguage.value,
@@ -168,11 +228,8 @@ class SettingsController {
 
   async testConnection() {
     const apiKey = this.elements.apiKey.value.trim();
-    const apiEndpoint = this.elements.apiEndpoint.value.trim();
-    const actualModel =
-      this.elements.model.value === 'custom'
-        ? this.elements.customModel.value.trim()
-        : this.elements.model.value;
+    const apiEndpoint = this.getResolvedEndpoint();
+    const actualModel = this.getResolvedModel();
 
     if (!apiKey) {
       this.showStatus('Please enter your API key first', 'error');
@@ -181,6 +238,11 @@ class SettingsController {
 
     if (!actualModel) {
       this.showStatus('Please select or enter a model', 'error');
+      return;
+    }
+
+    if (!apiEndpoint) {
+      this.showStatus('Please enter an API endpoint', 'error');
       return;
     }
 
@@ -232,19 +294,19 @@ class SettingsController {
       // Clear all stored settings
       await chrome.storage.local.clear();
 
-      // Reset form to defaults
-      Object.entries(this.defaultSettings).forEach(([key, value]) => {
-        const element = this.elements[key];
-        if (element) {
-          if (element.type === 'checkbox') {
-            element.checked = value;
-          } else {
-            element.value = value;
-          }
-        }
-      });
+      // Reset provider and repopulate models
+      this.elements.provider.value = this.defaultSettings.provider;
+      this.populateModelOptions(this.defaultSettings.provider);
 
+      // Reset form to defaults
+      this.elements.apiKey.value = this.defaultSettings.apiKey;
+      this.elements.apiEndpoint.value = this.defaultSettings.apiEndpoint;
+      this.elements.customModel.value = this.defaultSettings.customModel;
+      this.elements.targetLanguage.value = this.defaultSettings.targetLanguage;
+      this.elements.reasoningEffort.value = this.defaultSettings.reasoningEffort;
       this.elements.model.value = this.defaultSettings.model;
+
+      this.updateProviderSection();
       this.updateModelSection();
 
       this.showStatus('Settings reset to defaults', 'info');

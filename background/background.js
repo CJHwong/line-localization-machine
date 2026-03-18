@@ -383,7 +383,10 @@ class BackgroundScript {
     if (!this.ModelConfig) await this.loadSharedConfig();
     const defaultSettings = this.ModelConfig.getDefaultSettings();
     const settings = await chrome.storage.local.get(Object.keys(defaultSettings));
-    return { ...defaultSettings, ...settings };
+    const merged = this.ModelConfig.migrateSettings({ ...defaultSettings, ...settings });
+    // Resolve the endpoint from provider if not custom
+    merged.apiEndpoint = this.ModelConfig.resolveEndpoint(merged.provider, merged.apiEndpoint);
+    return merged;
   }
 
   async saveSettings(newSettings) {

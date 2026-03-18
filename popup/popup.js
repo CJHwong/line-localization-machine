@@ -35,16 +35,22 @@ class BeautifulPopupController {
       console.error('Failed to load shared config, using fallback:', error);
       // Fallback configuration if loading fails
       this.ModelConfig = {
-        DEFAULT_MODEL: 'gpt-4o-mini',
         getDefaultSettings() {
           return {
             apiKey: '',
+            provider: 'openai',
             apiEndpoint: 'https://api.openai.com/v1',
-            model: 'gpt-4o-mini',
+            model: 'gpt-5.4-nano',
             customModel: '',
             targetLanguage: 'chinese-traditional',
-            reasoningEffort: 'low',
+            reasoningEffort: 'medium',
           };
+        },
+        migrateSettings(s) {
+          return s;
+        },
+        resolveEndpoint(provider, endpoint) {
+          return endpoint;
         },
       };
     }
@@ -153,6 +159,7 @@ class BeautifulPopupController {
     try {
       this.settings = await chrome.storage.local.get([
         'apiKey',
+        'provider',
         'apiEndpoint',
         'model',
         'targetLanguage',
@@ -164,11 +171,15 @@ class BeautifulPopupController {
         await this.loadSharedConfig();
       }
 
-      // Set defaults if missing
-      this.settings = {
+      // Set defaults if missing, then migrate & resolve endpoint
+      this.settings = this.ModelConfig.migrateSettings({
         ...this.ModelConfig.getDefaultSettings(),
         ...this.settings,
-      };
+      });
+      this.settings.apiEndpoint = this.ModelConfig.resolveEndpoint(
+        this.settings.provider,
+        this.settings.apiEndpoint
+      );
     } catch (error) {
       console.error('Error loading settings:', error);
       this.updateStatusBadge('error', 'Config Error');
