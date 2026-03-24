@@ -142,6 +142,8 @@ class LineLocalizationMachine {
         this.clearTranslationState();
       }, 3000);
     } catch (error) {
+      Animation.hideTranslationProgress();
+
       this.updateTranslationState({
         isTranslating: false,
         status: 'error',
@@ -187,33 +189,97 @@ class LineLocalizationMachine {
       }
     });
 
-    // Build the full translation payload — all blocks in one request
-    const translationData = {
-      targetLanguage: this.getLanguageName(this.translationSettings.targetLanguage),
-      blocks: textBlocks.map((block, blockIndex) => ({
-        id: blockIndex,
-        items: block.map(item => item.textNodes.map(node => node.textContent)),
-      })),
-    };
+    // Track completed blocks across retries by original index
+    const completedBlockIndices = new Set();
+    const MAX_RETRIES = 3;
 
-    console.log(
-      `[LLM] Streaming translation: ${textBlocks.length} blocks, ` +
-        `${translationData.blocks.reduce((s, b) => s + b.items.length, 0)} items`
-    );
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      // Build payload for remaining blocks only
+      const remainingEntries = textBlocks
+        .map((block, idx) => ({ block, idx }))
+        .filter(({ idx }) => !completedBlockIndices.has(idx));
 
-    // Open a long-lived port to background for streaming
-    const port = chrome.runtime.connect({ name: 'streaming-translate' });
-    let completedCount = 0;
+      if (remainingEntries.length === 0) break;
 
-    await new Promise((resolve, reject) => {
-      // Queue blocks and render with minimum spacing so translations
-      // appear progressively even when the model bursts output all at once
-      // (common with reasoning models that think first, then dump the answer).
+      if (attempt > 0) {
+        console.log(
+          `[LLM] Resuming translation (attempt ${attempt + 1}): ` +
+            `${remainingEntries.length} blocks remaining`
+        );
+      }
+
+      const translationData = {
+        targetLanguage: this.getLanguageName(this.translationSettings.targetLanguage),
+        blocks: remainingEntries.map(({ block, idx }) => ({
+          id: idx,
+          items: block.map(item => item.textNodes.map(node => node.textContent)),
+        })),
+      };
+
+      console.log(
+        `[LLM] Streaming translation: ${remainingEntries.length} blocks, ` +
+          `${translationData.blocks.reduce((s, b) => s + b.items.length, 0)} items`
+      );
+
+      const result = await this.streamTranslationBlocks(
+        textBlocks,
+        translationData,
+        completedBlockIndices
+      );
+
+      if (result.fatal) throw result.error;
+      if (completedBlockIndices.size >= textBlocks.length) break;
+
+      // All remaining blocks' elements are detached — no point retrying
+      if (result.allDetached) break;
+    }
+
+    if (completedBlockIndices.size < textBlocks.length) {
+      console.warn(
+        `[LLM] Translation incomplete after retries: ` +
+          `${completedBlockIndices.size}/${textBlocks.length} blocks`
+      );
+    }
+
+    Animation.hideTranslationProgress();
+    Animation.addGlobalToggleButton(this.translatedElements);
+  }
+
+  /**
+   * Opens a streaming port and renders translated blocks as they arrive.
+   * Resolves with { fatal, error, allDetached } — never rejects.
+   * The caller retries when the stream is interrupted.
+   */
+  streamTranslationBlocks(textBlocks, translationData, completedBlockIndices) {
+    let port;
+    try {
+      port = chrome.runtime.connect({ name: 'streaming-translate' });
+    } catch (error) {
+      // Extension context invalidated (reload, update, disable)
+      console.warn('[LLM] Cannot connect to background:', error.message);
+      return Promise.resolve({ fatal: true, error });
+    }
+
+    return new Promise(resolve => {
       const MIN_RENDER_INTERVAL_MS = 120;
       const blockQueue = [];
       let rendering = false;
       let streamDone = false;
-      let streamError = null;
+      let fatalError = null;
+
+      const finalize = () => {
+        const allDone = completedBlockIndices.size >= textBlocks.length;
+        if (fatalError) {
+          resolve({ fatal: true, error: fatalError });
+        } else {
+          resolve({ fatal: false, allDetached: false });
+        }
+        if (allDone) {
+          console.log(
+            `[LLM] Stream complete: ${completedBlockIndices.size}/${textBlocks.length} blocks`
+          );
+        }
+      };
 
       const processQueue = async () => {
         if (rendering) return;
@@ -221,11 +287,11 @@ class LineLocalizationMachine {
 
         while (blockQueue.length > 0) {
           const renderStart = Date.now();
-          const { blockIndex, translatedBlock } = blockQueue.shift();
-          const originalBlock = textBlocks[blockIndex];
+          const { blockId, translatedBlock } = blockQueue.shift();
+          const originalBlock = textBlocks[blockId];
 
           if (!originalBlock) {
-            console.warn(`[LLM] Received block ${blockIndex} but no matching original`);
+            console.warn(`[LLM] Received block id ${blockId} but no matching original`);
             continue;
           }
 
@@ -260,30 +326,32 @@ class LineLocalizationMachine {
                   this.translationSettings,
                   this.debug
                 );
-                this.translatedElements.set(item.element, htmlPair);
+                if (htmlPair) {
+                  this.translatedElements.set(item.element, htmlPair);
+                }
               } catch (animationError) {
                 console.warn('Error animating item:', animationError);
               }
             }
           } catch (error) {
-            console.warn(`[LLM] Error processing block ${blockIndex}:`, error);
+            console.warn(`[LLM] Error processing block ${blockId}:`, error);
             Animation.animateBlockError(originalBlock);
           }
 
-          completedCount++;
-          this.completedBlocks = completedCount;
+          completedBlockIndices.add(blockId);
+          this.completedBlocks = completedBlockIndices.size;
 
-          Animation.updateTranslationProgress(completedCount, textBlocks.length);
+          Animation.updateTranslationProgress(completedBlockIndices.size, textBlocks.length);
           this.updateTranslationState({
             isTranslating: true,
             status: 'translating',
-            progress: Math.round((completedCount / textBlocks.length) * 100),
+            progress: Math.round((completedBlockIndices.size / textBlocks.length) * 100),
             totalBlocks: textBlocks.length,
-            completedBlocks: completedCount,
+            completedBlocks: completedBlockIndices.size,
           });
 
           console.log(
-            `[LLM] Block ${blockIndex} rendered (${completedCount}/${textBlocks.length})`
+            `[LLM] Block ${blockId} rendered (${completedBlockIndices.size}/${textBlocks.length})`
           );
 
           // Enforce minimum spacing between block renders so the user
@@ -299,15 +367,7 @@ class LineLocalizationMachine {
 
         rendering = false;
 
-        // If the stream already finished while we were rendering, resolve now
-        if (streamDone) {
-          console.log(`[LLM] Stream complete: ${completedCount}/${textBlocks.length} blocks`);
-          if (streamError) {
-            reject(streamError);
-          } else {
-            resolve();
-          }
-        }
+        if (streamDone) finalize();
       };
 
       port.onMessage.addListener(message => {
@@ -316,43 +376,36 @@ class LineLocalizationMachine {
           const kChars = (message.chars / 1000).toFixed(0);
           Animation.updateReasoningProgress(seconds, kChars, message.snippet);
         } else if (message.type === 'block') {
-          blockQueue.push({ blockIndex: message.index, translatedBlock: message.block });
+          // Use block.id to map back to original textBlocks index
+          const blockId = message.block?.id ?? message.index;
+          blockQueue.push({ blockId, translatedBlock: message.block });
           processQueue();
         } else if (message.type === 'done') {
           port.disconnect();
           streamDone = true;
-          // If queue is empty and not rendering, resolve immediately
-          if (blockQueue.length === 0 && !rendering) {
-            console.log(`[LLM] Stream complete: ${completedCount}/${textBlocks.length} blocks`);
-            resolve();
-          }
-          // Otherwise processQueue will resolve when it drains
+          if (blockQueue.length === 0 && !rendering) finalize();
         } else if (message.type === 'error') {
           console.error('[LLM] Stream error:', message.error);
           port.disconnect();
 
           const error = new Error(message.error);
           error.isRetryable = message.isRetryable;
-          if (!message.isRetryable) {
-            error.isFatalError = true;
-          }
 
           streamDone = true;
-          streamError = error;
-          if (blockQueue.length === 0 && !rendering) {
-            reject(error);
+          if (!message.isRetryable) {
+            error.isFatalError = true;
+            fatalError = error;
           }
+          if (blockQueue.length === 0 && !rendering) finalize();
         }
       });
 
       port.onDisconnect.addListener(() => {
-        if (completedCount < textBlocks.length && !streamDone) {
+        if (!streamDone) {
           const disconnectError = chrome.runtime.lastError;
           console.warn('[LLM] Port disconnected:', disconnectError?.message || 'unknown');
           streamDone = true;
-          if (blockQueue.length === 0 && !rendering) {
-            resolve();
-          }
+          if (blockQueue.length === 0 && !rendering) finalize();
         }
       });
 
@@ -363,9 +416,6 @@ class LineLocalizationMachine {
         settings: this.translationSettings,
       });
     });
-
-    Animation.hideTranslationProgress();
-    Animation.addGlobalToggleButton(this.translatedElements);
   }
 
   getLanguageName(languageCode) {

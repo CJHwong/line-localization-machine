@@ -196,6 +196,13 @@ async function animateTranslation(block, translatedItems, settings) {
  */
 async function animateLineTransition(item, translatedSegments, settings, debug) {
   const element = item.element;
+
+  // Skip if element was detached from DOM (page re-rendered, SPA navigation, etc.)
+  if (!document.contains(element)) {
+    if (debug) console.warn('[Animation] Skipping detached element');
+    return null;
+  }
+
   const segments = Array.isArray(translatedSegments)
     ? translatedSegments
     : [String(translatedSegments ?? '')];

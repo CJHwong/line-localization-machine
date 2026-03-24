@@ -448,7 +448,8 @@ Output: {"blocks":[{"id":0,"items":[["點擊","這裡","繼續"],["你好世界"
             parseError.message
           );
         } else {
-          // No blocks delivered at all — this is a real failure
+          // No blocks delivered at all — LLM returned unparseable JSON, retry
+          parseError.isRetryable = true;
           throw parseError;
         }
       }
