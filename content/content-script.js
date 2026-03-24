@@ -234,6 +234,14 @@ class LineLocalizationMachine {
       if (result.allDetached) break;
     }
 
+    // Stop the breathing animation on any blocks that were never translated
+    for (let i = 0; i < textBlocks.length; i++) {
+      if (completedBlockIndices.has(i)) continue;
+      for (const item of textBlocks[i]) {
+        item.element.classList.remove('llm-preparing');
+      }
+    }
+
     if (completedBlockIndices.size < textBlocks.length) {
       console.warn(
         `[LLM] Translation incomplete after retries: ` +
