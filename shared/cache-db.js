@@ -51,15 +51,38 @@ const TranslationCache = (() => {
     });
   }
 
-  async function put(cacheKey, targetLanguage, blocks, totalBlocks) {
+  async function put(cacheKey, targetLanguage, blocks, totalBlocks, metadata) {
     const db = await initDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const record = { cacheKey, targetLanguage, blocks, totalBlocks, createdAt: Date.now() };
+      const record = {
+        cacheKey,
+        targetLanguage,
+        blocks,
+        totalBlocks,
+        createdAt: Date.now(),
+        ...(metadata || {}),
+      };
       const request = store.put(record);
 
       request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function list() {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const records = request.result || [];
+        records.sort((a, b) => b.createdAt - a.createdAt);
+        resolve(records);
+      };
       request.onerror = () => reject(request.error);
     });
   }
@@ -76,5 +99,22 @@ const TranslationCache = (() => {
     });
   }
 
-  return { initDB, get, put, remove };
+  async function clear() {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function closeDB() {
+    if (!dbPromise) return;
+    const db = await dbPromise;
+    db.close();
+    dbPromise = null;
+  }
+
+  return { initDB, get, put, list, remove, clear, closeDB };
 })();

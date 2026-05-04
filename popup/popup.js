@@ -13,6 +13,7 @@ class BeautifulPopupController {
       quickLanguage: document.getElementById('quickLanguage'),
       translatePage: document.getElementById('translatePage'),
       openSettings: document.getElementById('openSettings'),
+      openHistory: document.getElementById('openHistory'),
       statusBadge: document.getElementById('statusBadge'),
       statusText: document.getElementById('statusText'),
       statusMessage: document.getElementById('statusMessage'),
@@ -439,6 +440,7 @@ class BeautifulPopupController {
   bindEvents() {
     this.elements.translatePage.addEventListener('click', () => this.translatePage());
     this.elements.openSettings.addEventListener('click', () => this.openSettings());
+    this.elements.openHistory.addEventListener('click', () => this.openHistory());
 
     // Update language preference when changed — saves immediately
     this.elements.quickLanguage.addEventListener('change', async () => {
@@ -648,6 +650,10 @@ class BeautifulPopupController {
       const settingsUrl = chrome.runtime.getURL('settings/settings.html');
       chrome.tabs.create({ url: settingsUrl });
     }
+  }
+
+  openHistory() {
+    chrome.tabs.create({ url: chrome.runtime.getURL('history/history.html') });
   }
 
   updateStatusBadge(type, text) {

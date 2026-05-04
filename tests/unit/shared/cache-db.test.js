@@ -13,9 +13,18 @@ eval(cacheSource + '\nglobal.TranslationCache = TranslationCache;\n');
 
 describe('TranslationCache', () => {
   afterEach(async () => {
-    // Delete the database after each test to ensure isolation
+    // Close open connection, delete the database, then re-create the wrapper.
+    // Closing first is required by fake-indexeddb — deleteDatabase blocks
+    // if any connection to the named database is still open.
+    if (global.TranslationCache) {
+      await TranslationCache.closeDB();
+    }
+    await new Promise((resolve, reject) => {
+      const req = indexedDB.deleteDatabase('llm-translation-cache');
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
     global.TranslationCache = null;
-    // Re-eval to reset the module-level dbPromise
     eval(cacheSource + '\nglobal.TranslationCache = TranslationCache;\n');
   });
 
@@ -74,5 +83,40 @@ describe('TranslationCache', () => {
 
     const result = await TranslationCache.get(cacheKey);
     expect(result.blocks[0].items[0][0]).toBe('v2');
+  });
+
+  test('list returns empty array when no entries', async () => {
+    const result = await TranslationCache.list();
+    expect(result).toEqual([]);
+  });
+
+  test('list returns all entries sorted by createdAt desc', async () => {
+    await TranslationCache.put('key1_en', 'en', [{ id: 0, items: [['hello']] }], 1);
+    // Insert with a slight delay so createdAt timestamps differ
+    await new Promise(r => setTimeout(r, 10));
+    await TranslationCache.put('key2_ja', 'ja', [{ id: 0, items: [['konnichiwa']] }], 1);
+
+    const result = await TranslationCache.list();
+    expect(result).toHaveLength(2);
+    expect(result[0].cacheKey).toBe('key2_ja');
+    expect(result[1].cacheKey).toBe('key1_en');
+  });
+
+  test('put round-trips metadata', async () => {
+    const cacheKey = 'hash_meta_zh-TW';
+    const metadata = {
+      url: 'https://example.com/article',
+      title: 'Test Article',
+      sourceText: 'Once upon a time...',
+    };
+
+    await TranslationCache.put(cacheKey, 'zh-TW', [{ id: 0, items: [['測試']] }], 1, metadata);
+
+    const records = await TranslationCache.list();
+    const record = records.find(r => r.cacheKey === cacheKey);
+    expect(record).toBeDefined();
+    expect(record.url).toBe('https://example.com/article');
+    expect(record.title).toBe('Test Article');
+    expect(record.sourceText).toBe('Once upon a time...');
   });
 });

@@ -203,7 +203,10 @@ class LineLocalizationMachine {
 
     if (!skipCache) {
       try {
-        const cached = await TranslationCache.get(cacheKey);
+        const cached = await chrome.runtime.sendMessage({
+          action: 'CACHE_GET',
+          cacheKey,
+        });
         if (cached && cached.blocks && cached.blocks.length > 0) {
           console.log(`[LLM] Cache hit: ${cached.blocks.length} blocks for "${targetLanguage}"`);
           await this.renderCachedBlocks(cached, textBlocks);
@@ -328,12 +331,20 @@ class LineLocalizationMachine {
           // Fire-and-forget: cache the translation for future page loads
           if (cacheKey && receivedBlocks.length > 0) {
             const blocksForCache = receivedBlocks.filter(b => b != null);
-            TranslationCache.put(
-              cacheKey,
-              this.translationSettings.targetLanguage,
-              blocksForCache,
-              textBlocks.length
-            ).catch(err => console.warn('[LLM] Cache write failed:', err.message));
+            chrome.runtime
+              .sendMessage({
+                action: 'CACHE_PUT',
+                cacheKey,
+                targetLanguage: this.translationSettings.targetLanguage,
+                blocks: blocksForCache,
+                totalBlocks: textBlocks.length,
+                metadata: {
+                  url: window.location.href,
+                  title: document.title,
+                  sourceText: textBlocks[0]?.[0]?.textNodes[0]?.textContent?.slice(0, 120) || '',
+                },
+              })
+              .catch(err => console.warn('[LLM] Cache write failed:', err.message));
           }
         }
       };

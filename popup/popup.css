@@ -283,7 +283,8 @@ body {
   align-items: center;
 }
 
-.settings-btn {
+.settings-btn,
+.history-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -297,9 +298,14 @@ body {
   transition: all 0.15s ease;
 }
 
-.settings-btn:hover {
+.settings-btn:hover,
+.history-btn:hover {
   border-color: var(--border-hover);
   color: var(--accent);
+}
+
+.popup-footer {
+  gap: 6px;
 }
 
 /* ── Status message toast ── */

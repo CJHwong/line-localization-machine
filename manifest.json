@@ -18,7 +18,6 @@
         "vendor/readability-0.6.0/Readability.js",
         "content/text-extraction.js",
         "content/animation.js",
-        "shared/cache-db.js",
         "content/content-script.js"
       ],
       "css": ["content/animations.css"]

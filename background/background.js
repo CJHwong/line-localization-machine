@@ -299,6 +299,23 @@ class BackgroundScript {
         case 'CLEAR_TRANSLATION_STATE':
           return clearTranslationState(this.translationStates, message.tabId, this.debug);
 
+        case 'CACHE_GET':
+          return await this.cacheGet(message.cacheKey);
+
+        case 'CACHE_PUT':
+          await this.cachePut(
+            message.cacheKey,
+            message.targetLanguage,
+            message.blocks,
+            message.totalBlocks,
+            message.metadata
+          );
+          return { success: true };
+
+        case 'CACHE_REMOVE':
+          await this.cacheRemove(message.cacheKey);
+          return { success: true };
+
         case 'GET_CURRENT_TAB_ID':
           return await this.getCurrentTabId(sender);
 
@@ -409,6 +426,85 @@ class BackgroundScript {
       console.warn('Could not get current tab ID:', error);
     }
     return { success: false, error: 'Could not determine tab ID' };
+  }
+
+  // ─── Translation Cache (IndexedDB) ──────────────────────────────────────
+  // DB_NAME / STORE_NAME must match shared/cache-db.js.
+
+  CACHE_DB_NAME = 'llm-translation-cache';
+  CACHE_STORE_NAME = 'translations';
+  _cacheDbPromise = null;
+
+  _cacheInitDB() {
+    if (this._cacheDbPromise) return this._cacheDbPromise;
+
+    this._cacheDbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.CACHE_DB_NAME, 1);
+
+      request.onupgradeneeded = event => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(this.CACHE_STORE_NAME)) {
+          const store = db.createObjectStore(this.CACHE_STORE_NAME, { keyPath: 'cacheKey' });
+          store.createIndex('createdAt', 'createdAt', { unique: false });
+        }
+      };
+
+      request.onsuccess = event => resolve(event.target.result);
+      request.onerror = event => reject(event.target.error);
+    });
+
+    return this._cacheDbPromise;
+  }
+
+  async cacheGet(cacheKey) {
+    const db = await this._cacheInitDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.CACHE_STORE_NAME, 'readonly');
+      const store = tx.objectStore(this.CACHE_STORE_NAME);
+      const request = store.get(cacheKey);
+
+      request.onsuccess = () => {
+        const record = request.result;
+        if (!record) {
+          resolve(null);
+          return;
+        }
+        resolve({ blocks: record.blocks, totalBlocks: record.totalBlocks });
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async cachePut(cacheKey, targetLanguage, blocks, totalBlocks, metadata) {
+    const db = await this._cacheInitDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.CACHE_STORE_NAME, 'readwrite');
+      const store = tx.objectStore(this.CACHE_STORE_NAME);
+      const record = {
+        cacheKey,
+        targetLanguage,
+        blocks,
+        totalBlocks,
+        createdAt: Date.now(),
+        ...(metadata || {}),
+      };
+      const request = store.put(record);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async cacheRemove(cacheKey) {
+    const db = await this._cacheInitDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.CACHE_STORE_NAME, 'readwrite');
+      const store = tx.objectStore(this.CACHE_STORE_NAME);
+      const request = store.delete(cacheKey);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
   }
 
   getLanguageName(languageCode) {
