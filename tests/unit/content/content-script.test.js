@@ -316,3 +316,144 @@ describe('identifyArticleContent', () => {
     expect(TextExtraction.normalizeWhitespace('line\n\ttwo')).toBe('line two');
   });
 });
+
+// ─── computeHash & computeCacheKey ─────────────────────────────────────────────
+
+describe('computeHash', () => {
+  let machine;
+
+  beforeEach(() => {
+    // Create instance without triggering the constructor's side effects
+    machine = new LineLocalizationMachine();
+    // Prevent init() from running message listeners we don't need
+    chrome.runtime.onMessage.addListener.mockClear();
+  });
+
+  test('produces deterministic output for same input', () => {
+    const block = {
+      element: document.createElement('p'),
+      originalText: 'Hello world',
+      textNodes: [document.createTextNode('Hello world')],
+    };
+    const blocks = [[block]];
+
+    const hash1 = machine.computeHash(blocks);
+    const hash2 = machine.computeHash(blocks);
+    expect(hash1).toBe(hash2);
+  });
+
+  test('produces different hash for different content', () => {
+    const block1 = {
+      element: document.createElement('p'),
+      originalText: 'Hello world',
+      textNodes: [document.createTextNode('Hello world')],
+    };
+    const block2 = {
+      element: document.createElement('p'),
+      originalText: 'Goodbye world',
+      textNodes: [document.createTextNode('Goodbye world')],
+    };
+
+    const hash1 = machine.computeHash([[block1]]);
+    const hash2 = machine.computeHash([[block2]]);
+    expect(hash1).not.toBe(hash2);
+  });
+
+  test('produces different hash for different block ordering', () => {
+    const block1 = {
+      element: document.createElement('p'),
+      originalText: 'First',
+      textNodes: [document.createTextNode('First')],
+    };
+    const block2 = {
+      element: document.createElement('p'),
+      originalText: 'Second',
+      textNodes: [document.createTextNode('Second')],
+    };
+
+    const hash1 = machine.computeHash([[block1], [block2]]);
+    const hash2 = machine.computeHash([[block2], [block1]]);
+    expect(hash1).not.toBe(hash2);
+  });
+
+  test('computeCacheKey includes target language in key', () => {
+    const block = {
+      element: document.createElement('p'),
+      originalText: 'Hello world',
+      textNodes: [document.createTextNode('Hello world')],
+    };
+    const blocks = [[block]];
+
+    const keyZh = machine.computeCacheKey(blocks, 'zh-TW');
+    const keyEn = machine.computeCacheKey(blocks, 'en');
+
+    expect(keyZh).toContain('_zh-TW');
+    expect(keyEn).toContain('_en');
+    expect(keyZh).not.toBe(keyEn);
+  });
+});
+
+// ─── renderCachedBlocks ─────────────────────────────────────────────────────────
+
+describe('renderCachedBlocks', () => {
+  let machine;
+  let textBlocks;
+  let origAnimation;
+
+  beforeEach(() => {
+    // Save originals and replace with jest.fn() so we can assert calls
+    origAnimation = { ...Animation };
+
+    Animation.showTranslationProgress = jest.fn();
+    Animation.updateTranslationProgress = jest.fn();
+    Animation.hideTranslationProgress = jest.fn();
+    Animation.animateBlockStart = jest.fn();
+    Animation.animateBlockError = jest.fn();
+    Animation.animateLineTransition = jest.fn(() => ({ originalHTML: '', translatedHTML: '' }));
+    Animation.addGlobalToggleButton = jest.fn();
+
+    machine = new LineLocalizationMachine();
+    chrome.runtime.onMessage.addListener.mockClear();
+
+    machine.translationSettings = {
+      targetLanguage: 'zh-TW',
+      animationSpeed: 1,
+      model: 'test-model',
+    };
+
+    const p1 = document.createElement('p');
+    p1.textContent = 'Hello world';
+    const textNode1 = p1.firstChild;
+    textBlocks = [[{ element: p1, originalText: 'Hello world', textNodes: [textNode1] }]];
+  });
+
+  afterEach(() => {
+    // Restore original Animation functions
+    Object.assign(Animation, origAnimation);
+  });
+
+  test('renders cached blocks and calls Animation methods', async () => {
+    const cachedData = {
+      blocks: [{ id: 0, items: [['你好世界']] }],
+      totalBlocks: 1,
+    };
+
+    await machine.renderCachedBlocks(cachedData, textBlocks);
+
+    expect(Animation.animateLineTransition).toHaveBeenCalled();
+    expect(Animation.addGlobalToggleButton).toHaveBeenCalled();
+    expect(Animation.hideTranslationProgress).toHaveBeenCalled();
+  });
+
+  test('handles cached block id with no matching original', async () => {
+    const cachedData = {
+      blocks: [{ id: 99, items: [['missing']] }],
+      totalBlocks: 1,
+    };
+
+    await machine.renderCachedBlocks(cachedData, textBlocks);
+
+    expect(Animation.animateLineTransition).not.toHaveBeenCalled();
+    expect(Animation.hideTranslationProgress).toHaveBeenCalled();
+  });
+});

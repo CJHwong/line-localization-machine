@@ -248,19 +248,29 @@ async function animateLineTransition(item, translatedSegments, settings, debug) 
 
 // ─── Toggle Button ────────────────────────────────────────────────────────────
 
-function addGlobalToggleButton(translatedElements) {
-  if (document.getElementById('llm-original-toggle')) return;
+function addGlobalToggleButton(translatedElements, retranslateCallback) {
+  const existing = document.getElementById('llm-original-toggle');
+  if (existing) existing.remove();
 
   setTimeout(() => {
-    createToggleButton(translatedElements);
+    createToggleButton(translatedElements, retranslateCallback);
   }, 1500);
 }
 
-function createToggleButton(translatedElements) {
+function createToggleButton(translatedElements, retranslateCallback) {
   const toggleButton = document.createElement('div');
   toggleButton.id = 'llm-original-toggle';
+  const retranslateHTML = retranslateCallback
+    ? `<button class="llm-retranslate-btn" title="Re-translate (skip cache)">
+         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+           <polyline points="23 4 23 10 17 10" />
+           <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+         </svg>
+       </button>`
+    : '';
   toggleButton.innerHTML = `
     <div class="llm-toggle-container">
+      ${retranslateHTML}
       <button class="llm-toggle-btn" title="Toggle between translated and original text">
         <svg class="toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 0 1 6.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -287,10 +297,36 @@ function createToggleButton(translatedElements) {
     }
 
     .llm-toggle-container {
+      display: flex;
+      align-items: stretch;
       background: #fffffe;
       border: 1px solid #e0ded7;
       border-radius: 4px;
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+
+    .llm-retranslate-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      background: none;
+      border: none;
+      border-right: 1px solid #e0ded7;
+      color: #a8a49a;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border-radius: 4px 0 0 4px;
+    }
+
+    .llm-retranslate-btn:hover {
+      background: #f7f6f3;
+      color: #d97706;
+    }
+
+    .llm-retranslate-btn.loading {
+      pointer-events: none;
+      opacity: 0.4;
     }
 
     .llm-toggle-btn {
@@ -336,6 +372,16 @@ function createToggleButton(translatedElements) {
 
   document.head.appendChild(style);
   document.body.appendChild(toggleButton);
+
+  if (retranslateCallback) {
+    const retranslateBtn = toggleButton.querySelector('.llm-retranslate-btn');
+    retranslateBtn.addEventListener('click', () => {
+      retranslateBtn.classList.add('loading');
+      retranslateCallback().finally(() => {
+        retranslateBtn.classList.remove('loading');
+      });
+    });
+  }
 
   const button = toggleButton.querySelector('.llm-toggle-btn');
   let globalShowingOriginals = false;

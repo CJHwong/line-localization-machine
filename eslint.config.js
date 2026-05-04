@@ -27,6 +27,7 @@ module.exports = [
         // Standard browser globals
         window: 'readonly',
         document: 'readonly',
+        URL: 'readonly',
         console: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
@@ -50,6 +51,13 @@ module.exports = [
         // Content script modules (loaded before content-script.js)
         TextExtraction: 'readonly',
         Animation: 'readonly',
+        TranslationCache: 'readonly',
+
+        // Browser APIs
+        indexedDB: 'readonly',
+        IDBRequest: 'readonly',
+        IDBTransaction: 'readonly',
+        IDBObjectStore: 'readonly',
 
         // Node.js globals (for config files)
         process: 'readonly',
@@ -142,6 +150,14 @@ module.exports = [
         fetch: 'readonly',
         chrome: 'readonly',
         browser: 'readonly',
+
+        // Content script globals (loaded via eval in tests)
+        LineLocalizationMachine: 'readonly',
+        TextExtraction: 'readonly',
+        Animation: 'readonly',
+        TranslationCache: 'readonly',
+        Readability: 'readonly',
+        isProbablyReaderable: 'readonly',
       },
     },
     plugins: {

@@ -377,6 +377,17 @@ body {
   background: var(--blue-600);
 }
 
+/* ── Translate button row ── */
+.translate-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.translate-row .translate-btn {
+  flex: 1;
+}
+
 /* ── Entry animation ── */
 @keyframes fade-up {
   from {

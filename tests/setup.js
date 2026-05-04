@@ -1,4 +1,13 @@
 // Global test setup
+
+// Polyfill structuredClone for fake-indexeddb (Node < 17)
+if (!global.structuredClone) {
+  global.structuredClone = val => JSON.parse(JSON.stringify(val));
+}
+
+// Set up fake-indexeddb for tests (IndexedDB is not available in jsdom)
+require('fake-indexeddb/auto');
+
 global.chrome = {
   storage: {
     local: {

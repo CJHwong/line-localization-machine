@@ -37,7 +37,8 @@ class LineLocalizationMachine {
           });
         }
 
-        this.startTranslation(message.settings)
+        const skipCache = message.skipCache || false;
+        this.startTranslation(message.settings, skipCache)
           .then(() => sendResponse({ success: true }))
           .catch(error => sendResponse({ success: false, error: error.message }));
         return true; // Keep message channel open for async response
@@ -72,7 +73,7 @@ class LineLocalizationMachine {
     }
   }
 
-  async startTranslation(settings) {
+  async startTranslation(settings, skipCache = false) {
     if (this.isTranslating) {
       throw new Error('Translation already in progress');
     }
@@ -96,6 +97,15 @@ class LineLocalizationMachine {
     this.translationSettings = settings;
     this.translationHistory = [];
     this.completedBlocks = 0;
+
+    // If re-translating an already translated page, restore original DOM text
+    // before extraction, otherwise we extract translated text and re-translate it.
+    // Must happen BEFORE clearPreviousTranslationState which clears translatedElements.
+    if (this.translatedElements.size > 0) {
+      for (const [element, data] of this.translatedElements) {
+        element.innerHTML = data.originalHTML;
+      }
+    }
 
     // Clear any existing progress indicators from previous translations
     this.clearPreviousTranslationState();
@@ -128,7 +138,7 @@ class LineLocalizationMachine {
         });
       }
 
-      await this.translateWithAnimations(textElements);
+      await this.translateWithAnimations(textElements, skipCache);
 
       this.updateTranslationState({
         isTranslating: false,
@@ -165,11 +175,12 @@ class LineLocalizationMachine {
 
   // ─── Translation Pipeline ──────────────────────────────────────────────────
 
-  async translateWithAnimations(textElements) {
+  async translateWithAnimations(textElements, skipCache = false) {
     const textBlocks = TextExtraction.groupIntoBlocks(textElements);
     this.totalBlocks = textBlocks.length;
     this.completedBlocks = 0;
 
+    // Show progress immediately — cache lookup may block on IndexedDB
     this.updateTranslationState({
       isTranslating: true,
       status: 'translating',
@@ -177,10 +188,7 @@ class LineLocalizationMachine {
       totalBlocks: this.totalBlocks,
       completedBlocks: 0,
     });
-
     Animation.showTranslationProgress();
-
-    // Start scanning animation on all blocks
     textBlocks.forEach(block => {
       try {
         Animation.animateBlockStart(block);
@@ -188,6 +196,27 @@ class LineLocalizationMachine {
         console.warn('Error starting animation for block:', error);
       }
     });
+
+    // Check IndexedDB cache (unless user asked to skip)
+    const targetLanguage = this.translationSettings.targetLanguage;
+    const cacheKey = this.computeCacheKey(textBlocks, targetLanguage);
+
+    if (!skipCache) {
+      try {
+        const cached = await TranslationCache.get(cacheKey);
+        if (cached && cached.blocks && cached.blocks.length > 0) {
+          console.log(`[LLM] Cache hit: ${cached.blocks.length} blocks for "${targetLanguage}"`);
+          await this.renderCachedBlocks(cached, textBlocks);
+          return;
+        }
+      } catch (err) {
+        console.warn('[LLM] Cache read failed, falling back to API:', err.message);
+      }
+    }
+
+    if (skipCache) {
+      console.log('[LLM] Cache skipped — forcing fresh translation');
+    }
 
     // Track completed blocks across retries by original index
     const completedBlockIndices = new Set();
@@ -224,7 +253,9 @@ class LineLocalizationMachine {
       const result = await this.streamTranslationBlocks(
         textBlocks,
         translationData,
-        completedBlockIndices
+        completedBlockIndices,
+        [],
+        cacheKey
       );
 
       if (result.fatal) throw result.error;
@@ -250,7 +281,9 @@ class LineLocalizationMachine {
     }
 
     Animation.hideTranslationProgress();
-    Animation.addGlobalToggleButton(this.translatedElements);
+    Animation.addGlobalToggleButton(this.translatedElements, () => {
+      return this.startTranslation(this.translationSettings, true);
+    });
   }
 
   /**
@@ -258,7 +291,13 @@ class LineLocalizationMachine {
    * Resolves with { fatal, error, allDetached } — never rejects.
    * The caller retries when the stream is interrupted.
    */
-  streamTranslationBlocks(textBlocks, translationData, completedBlockIndices) {
+  streamTranslationBlocks(
+    textBlocks,
+    translationData,
+    completedBlockIndices,
+    receivedBlocks,
+    cacheKey
+  ) {
     let port;
     try {
       port = chrome.runtime.connect({ name: 'streaming-translate' });
@@ -286,6 +325,16 @@ class LineLocalizationMachine {
           console.log(
             `[LLM] Stream complete: ${completedBlockIndices.size}/${textBlocks.length} blocks`
           );
+          // Fire-and-forget: cache the translation for future page loads
+          if (cacheKey && receivedBlocks.length > 0) {
+            const blocksForCache = receivedBlocks.filter(b => b != null);
+            TranslationCache.put(
+              cacheKey,
+              this.translationSettings.targetLanguage,
+              blocksForCache,
+              textBlocks.length
+            ).catch(err => console.warn('[LLM] Cache write failed:', err.message));
+          }
         }
       };
 
@@ -304,43 +353,7 @@ class LineLocalizationMachine {
           }
 
           try {
-            let translatedItems = translatedBlock.items || [];
-
-            // Pad or trim items to match block size
-            if (translatedItems.length < originalBlock.length) {
-              while (translatedItems.length < originalBlock.length) {
-                const fallbackItem = originalBlock[translatedItems.length];
-                translatedItems.push(fallbackItem.textNodes.map(n => n.textContent));
-              }
-            } else if (translatedItems.length > originalBlock.length) {
-              translatedItems = translatedItems.slice(0, originalBlock.length);
-            }
-
-            // Coerce each item to an array of strings
-            translatedItems = translatedItems.map(segments => {
-              if (!Array.isArray(segments)) return [String(segments ?? '')];
-              return segments.map(s => String(s ?? ''));
-            });
-
-            // Animate each item in the block
-            for (let k = 0; k < originalBlock.length; k++) {
-              const item = originalBlock[k];
-              const segments = translatedItems[k] || item.textNodes.map(n => n.textContent);
-
-              try {
-                const htmlPair = await Animation.animateLineTransition(
-                  item,
-                  segments,
-                  this.translationSettings,
-                  this.debug
-                );
-                if (htmlPair) {
-                  this.translatedElements.set(item.element, htmlPair);
-                }
-              } catch (animationError) {
-                console.warn('Error animating item:', animationError);
-              }
-            }
+            await this.renderBlockItems(originalBlock, translatedBlock.items || []);
           } catch (error) {
             console.warn(`[LLM] Error processing block ${blockId}:`, error);
             Animation.animateBlockError(originalBlock);
@@ -348,6 +361,7 @@ class LineLocalizationMachine {
 
           completedBlockIndices.add(blockId);
           this.completedBlocks = completedBlockIndices.size;
+          receivedBlocks[blockId] = translatedBlock;
 
           Animation.updateTranslationProgress(completedBlockIndices.size, textBlocks.length);
           this.updateTranslationState({
@@ -424,6 +438,125 @@ class LineLocalizationMachine {
         settings: this.translationSettings,
       });
     });
+  }
+
+  // ─── Cache helpers ────────────────────────────────────────────────────────
+
+  DJB2_INIT = 5381;
+  DJB2_MULT = 33;
+
+  computeHash(textBlocks) {
+    const content = JSON.stringify(
+      textBlocks.map((block, idx) => ({
+        id: idx,
+        items: block.map(item => item.textNodes.map(n => n.textContent)),
+      }))
+    );
+    let hash = this.DJB2_INIT;
+    for (let i = 0; i < content.length; i++) {
+      hash = (hash * this.DJB2_MULT) ^ content.charCodeAt(i);
+    }
+    return (hash >>> 0).toString(16);
+  }
+
+  computeCacheKey(textBlocks, targetLanguage) {
+    return `${this.computeHash(textBlocks)}_${targetLanguage}`;
+  }
+
+  async renderBlockItems(originalBlock, translatedItems) {
+    if (translatedItems.length < originalBlock.length) {
+      while (translatedItems.length < originalBlock.length) {
+        const fallbackItem = originalBlock[translatedItems.length];
+        translatedItems.push(fallbackItem.textNodes.map(n => n.textContent));
+      }
+    } else if (translatedItems.length > originalBlock.length) {
+      translatedItems = translatedItems.slice(0, originalBlock.length);
+    }
+
+    translatedItems = translatedItems.map(segments => {
+      if (!Array.isArray(segments)) return [String(segments ?? '')];
+      return segments.map(s => String(s ?? ''));
+    });
+
+    for (let k = 0; k < originalBlock.length; k++) {
+      const item = originalBlock[k];
+      const segments = translatedItems[k] || item.textNodes.map(n => n.textContent);
+
+      try {
+        const htmlPair = await Animation.animateLineTransition(
+          item,
+          segments,
+          this.translationSettings,
+          this.debug
+        );
+        if (htmlPair) {
+          this.translatedElements.set(item.element, htmlPair);
+        }
+      } catch (animationError) {
+        console.warn('Error animating item:', animationError);
+      }
+    }
+  }
+
+  async renderCachedBlocks(cachedData, textBlocks) {
+    this.totalBlocks = textBlocks.length;
+    this.completedBlocks = 0;
+
+    const MIN_RENDER_INTERVAL_MS = 80; // faster for cached — no network latency
+
+    for (const block of cachedData.blocks) {
+      const blockId = block.id;
+      const originalBlock = textBlocks[blockId];
+
+      if (!originalBlock) {
+        console.warn(`[LLM] Cached block id ${blockId} has no matching original`);
+        continue;
+      }
+
+      const renderStart = Date.now();
+
+      try {
+        await this.renderBlockItems(originalBlock, block.items || []);
+      } catch (error) {
+        console.warn(`[LLM] Error rendering cached block ${blockId}:`, error);
+        Animation.animateBlockError(originalBlock);
+      }
+
+      this.completedBlocks++;
+      Animation.updateTranslationProgress(this.completedBlocks, textBlocks.length);
+      this.updateTranslationState({
+        isTranslating: true,
+        status: 'translating',
+        progress: Math.round((this.completedBlocks / textBlocks.length) * 100),
+        totalBlocks: textBlocks.length,
+        completedBlocks: this.completedBlocks,
+      });
+
+      const elapsed = Date.now() - renderStart;
+      const remaining = MIN_RENDER_INTERVAL_MS - elapsed;
+      if (remaining > 0) {
+        await new Promise(r => setTimeout(r, remaining));
+      }
+    }
+
+    Animation.hideTranslationProgress();
+    Animation.addGlobalToggleButton(this.translatedElements, () => {
+      return this.startTranslation(this.translationSettings, true);
+    });
+
+    this.updateTranslationState({
+      isTranslating: false,
+      status: 'completed',
+      progress: 100,
+      totalBlocks: this.totalBlocks,
+      completedBlocks: this.completedBlocks,
+    });
+
+    setTimeout(() => {
+      this.clearTranslationState();
+    }, 3000);
+
+    console.log(`[LLM] Cache replay complete: ${this.completedBlocks}/${textBlocks.length} blocks`);
   }
 
   getLanguageName(languageCode) {
