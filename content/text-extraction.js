@@ -179,6 +179,10 @@ function identifyArticleContent() {
  */
 function isArticleContent(element, articleData) {
   if (!articleData) return true; // No Readability data → accept everything (fallback mode)
+
+  // Headings are structurally part of the article — skip Readability matching
+  if (/^H[1-6]$/.test(element.tagName)) return true;
+
   const text = normalizeWhitespace(element.textContent);
   if (text.length < 10) return false;
 
@@ -252,9 +256,10 @@ function extractTextElements(container, articleData) {
         if (nonContentAncestor && nonContentAncestor !== container) continue;
       }
 
-      // Check text length
+      // Check text length (headings are always kept — structurally part of the article)
+      const tagName = element.tagName;
       const text = element.textContent.trim();
-      if (text.length < 10) continue;
+      if (text.length < 10 && !/^H[1-6]$/.test(tagName)) continue;
 
       // Readability filter: skip elements whose text isn't in the article
       if (!isArticleContent(element, articleData)) continue;
