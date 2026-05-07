@@ -32,6 +32,24 @@ When bumping the version, update exactly **2 files**:
 1. `manifest.json` → `"version"`
 2. `package.json` → `"version"`
 
+### Packaging Allowlist
+
+Both packaging scripts use an **explicit `cp -R` allowlist**, not a wildcard. When adding a new top-level folder that ships with the extension (e.g. `history/`):
+
+1. `scripts/package-chrome.sh` — add the folder name to the `cp -R` line
+2. `scripts/package-firefox.sh` — add the folder name to the `cp -R` line
+
+Forgetting this ships zips that omit the folder. Dev-loaded (unpacked) installs still work because they read from disk, so the bug only surfaces in packaged builds (Chrome Web Store, AMO, or `dist/*.zip`). `docs/publishing.md` also has stale manual `cp` snippets — keep those in sync or delete them.
+
+### Release Submission Text
+
+Every version bump must also append a new entry to `CHANGELOG.md` containing two strings the user pastes into the AMO/CWS submission form:
+
+1. **Release Notes** (user-facing, appears on the store detail page). Short bullet list of user-visible changes only. No commit hashes, no internal jargon, no "we".
+2. **Notes to Reviewer** (AMO requires this when source review applies). Confirm there is no transpilation/bundling/minification, give exact reproduction steps from a clean checkout, and list vendored third-party code (`vendor/readability-0.6.0/` Apache 2.0, `vendor/jsonriver-1.1.1/` BSD-3-Clause) so reviewers know what to skip.
+
+The reproduction steps must produce the exact zip the reviewer is reviewing. Reference the version-bump commit by SHA or tag.
+
 ### Adding New Models
 
 Update `shared/models.js` only:
