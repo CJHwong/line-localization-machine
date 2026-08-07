@@ -184,6 +184,23 @@ npm version major  # for breaking changes
 # Both Chrome and Firefox can use the same manifest.json (V3)
 ```
 
+## CI/CD Deployment TODO
+
+- [ ] Add a pull-request GitHub Actions workflow for tests, linting, formatting, packaging, and archive validation.
+- [ ] Commit `package-lock.json`, remove its ignore rule, and use reproducible `npm ci` installs in CI.
+- [ ] Upgrade and pin `web-ext` to the current supported major version, using Node.js 22 in CI.
+- [ ] Add a tag-triggered release workflow that verifies the tag matches the versions in `package.json` and `manifest.json`.
+- [ ] Build and validate the Chrome and Firefox packages once, then reuse those exact artifacts for publishing.
+- [ ] Create a GitHub Release from the matching `CHANGELOG.md` entry and retain both package archives as release artifacts.
+- [ ] Create a protected `store-production` GitHub environment with required reviewer approval.
+- [ ] Configure Chrome Web Store API v2 with a linked service account and GitHub Workload Identity Federation.
+- [ ] Configure Mozilla Add-ons API JWT credentials for `web-ext sign --channel=listed`.
+- [ ] Add independent Chrome and Firefox publishing jobs that run only after environment approval.
+- [ ] Keep end-to-end tests in a separate CI job until the mock-server and headed-browser requirements are CI-ready.
+- [ ] Decide whether the existing Firefox lint warnings should remain non-blocking or be fixed before enforcing warnings as errors.
+
+The current extension does not require source-code upload because its packages are assembled from source without bundling, minification, templating, or code generation.
+
 ## Marketing Assets
 
 ### Required Assets
