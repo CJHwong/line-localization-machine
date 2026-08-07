@@ -114,7 +114,7 @@ describe('API Client', () => {
     const mockSettings = {
       apiKey: 'test-api-key',
       apiEndpoint: 'https://api.openai.com/v1',
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.6-luna',
       targetLanguage: 'Spanish',
     };
 
@@ -210,7 +210,7 @@ describe('API Client', () => {
     const mockSettings = {
       apiKey: 'test-api-key',
       apiEndpoint: 'https://api.openai.com/v1',
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.6-luna',
       targetLanguage: 'Spanish',
     };
 

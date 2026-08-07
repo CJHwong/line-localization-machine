@@ -11,11 +11,11 @@ Line Localization Machine is a browser extension that provides AI-powered webpag
 
 ### Data You Provide
 
-- **API Key**: Your OpenAI (or compatible AI service) API key for translation services
+- **API Keys**: Provider-specific API keys for translation services
 - **API Endpoint**: Custom API endpoint URL if you use a different service provider
 - **Settings**: Your translation preferences including:
   - Target language selection
-  - Model selection (GPT-4o Mini, GPT-5 Mini, etc.)
+  - Model selection (GPT-5.6 Luna, Gemini 3.5 Flash Lite, etc.)
   - Animation speed and display preferences
   - Batch size and temperature settings
 
@@ -29,7 +29,7 @@ Line Localization Machine is a browser extension that provides AI-powered webpag
 
 ### Local Storage Only
 
-- All your settings and API keys are stored locally in your browser using `chrome.storage.local`
+- All your settings and provider-specific API keys are stored locally in your browser using `chrome.storage.local`
 - No personal data is transmitted to our servers or third parties
 - Your API key and settings never leave your device except when making translation requests to your chosen AI service
 

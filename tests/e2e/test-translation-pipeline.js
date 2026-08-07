@@ -20,7 +20,7 @@
  *   --keep-open  Keep browser open after test
  *   --live       Use real LLM API instead of mock server
  *   --endpoint=URL     API endpoint (default: https://api.openai.com/v1)
- *   --model=MODEL      Model name (default: gpt-4o-mini)
+ *   --model=MODEL      Model name (default: gpt-5.6-luna)
  *   --api-key-env=VAR  Env var for API key (default: OPENAI_API_KEY)
  */
 
@@ -77,7 +77,7 @@ class PipelineTest {
         process.exit(1);
       }
       const endpoint = API_ENDPOINT || 'https://api.openai.com/v1';
-      const model = MODEL_NAME || 'gpt-4o-mini';
+      const model = MODEL_NAME || 'gpt-5.6-luna';
       console.log(`   API key: $${API_KEY_ENV} (${apiKey.length} chars)`);
       console.log(`   Endpoint: ${endpoint}`);
       console.log(`   Model: ${model}`);
@@ -181,13 +181,13 @@ class PipelineTest {
       ? {
           apiKey: process.env[API_KEY_ENV],
           apiEndpoint: API_ENDPOINT || 'https://api.openai.com/v1',
-          model: MODEL_NAME || 'gpt-4o-mini',
+          model: MODEL_NAME || 'gpt-5.6-luna',
           targetLanguage: TARGET_LANG,
         }
       : {
           apiKey: 'mock-api-key',
           apiEndpoint: `${MOCK_SERVER}/v1`,
-          model: 'gpt-4o-mini',
+          model: 'gpt-5.6-luna',
           targetLanguage: TARGET_LANG,
         };
     console.log('   Sending START_TRANSLATION...');

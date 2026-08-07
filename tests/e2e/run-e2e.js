@@ -122,7 +122,7 @@ async function run() {
           settings: {
             apiKey: 'mock-api-key',
             apiEndpoint: 'http://localhost:3001/v1',
-            model: 'gpt-4o-mini',
+            model: 'gpt-5.6-luna',
             targetLanguage: 'spanish',
           },
         });

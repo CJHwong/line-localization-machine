@@ -9,9 +9,15 @@ describe('Extension Integration Tests', () => {
   beforeEach(() => {
     // Reset mock storage
     mockStorage = {
-      apiKey: 'test-key',
+      apiKeys: {
+        openai: 'test-key',
+        google: 'google-key',
+        ollama: '',
+        custom: '',
+      },
+      provider: 'openai',
       apiEndpoint: 'http://localhost:3001/v1/chat/completions',
-      model: 'gpt-4',
+      model: 'gpt-5.6-luna',
       targetLanguage: 'es',
     };
 
@@ -52,8 +58,12 @@ describe('Extension Integration Tests', () => {
   describe('Settings and Storage Integration', () => {
     test('should save and retrieve settings correctly', async () => {
       const testSettings = {
-        apiKey: 'new-test-key',
-        model: 'gpt-3.5-turbo',
+        apiKeys: {
+          openai: 'new-test-key',
+          google: 'google-key',
+        },
+        provider: 'openai',
+        model: 'gpt-5.6-luna',
         targetLanguage: 'fr',
       };
 
@@ -64,12 +74,32 @@ describe('Extension Integration Tests', () => {
 
       // Simulate retrieving settings
       const retrievedSettings = await new Promise(resolve => {
-        chrome.storage.local.get(['apiKey', 'model', 'targetLanguage'], resolve);
+        chrome.storage.local.get(['apiKeys', 'provider', 'model', 'targetLanguage'], resolve);
       });
 
-      expect(retrievedSettings.apiKey).toBe(testSettings.apiKey);
+      expect(retrievedSettings.apiKeys).toEqual(testSettings.apiKeys);
+      expect(retrievedSettings.provider).toBe(testSettings.provider);
       expect(retrievedSettings.model).toBe(testSettings.model);
       expect(retrievedSettings.targetLanguage).toBe(testSettings.targetLanguage);
+    });
+
+    test('should keep secrets isolated by provider', async () => {
+      await new Promise(resolve => {
+        chrome.storage.local.set(
+          {
+            apiKeys: { openai: 'openai-key', google: 'google-key' },
+          },
+          resolve
+        );
+      });
+
+      const retrievedSettings = await new Promise(resolve => {
+        chrome.storage.local.get(['apiKeys'], resolve);
+      });
+
+      expect(retrievedSettings.apiKeys.openai).toBe('openai-key');
+      expect(retrievedSettings.apiKeys.google).toBe('google-key');
+      expect(retrievedSettings.apiKeys.openai).not.toBe(retrievedSettings.apiKeys.google);
     });
 
     test('should handle missing settings with defaults', async () => {
@@ -77,12 +107,16 @@ describe('Extension Integration Tests', () => {
       mockStorage = {};
 
       const defaultSettings = {
-        apiKey: '',
+        apiKeys: {
+          openai: '',
+          google: '',
+          ollama: '',
+          custom: '',
+        },
+        provider: 'openai',
         apiEndpoint: 'https://api.openai.com/v1/chat/completions',
-        model: 'gpt-4',
+        model: 'gpt-5.6-luna',
         targetLanguage: 'es',
-        blocksPerRequest: 5,
-        temperature: 0.3,
       };
 
       const settings = await new Promise(resolve => {
@@ -170,28 +204,34 @@ describe('Extension Integration Tests', () => {
       const settings = await new Promise(resolve => {
         chrome.storage.local.get(
           {
-            apiKey: '',
+            apiKeys: { openai: 'test-key' },
+            provider: 'openai',
             apiEndpoint: 'http://localhost:3001/v1/chat/completions',
-            model: 'gpt-4',
+            model: 'gpt-5.6-luna',
             targetLanguage: 'es',
           },
           resolve
         );
       });
 
+      const runtimeSettings = {
+        ...settings,
+        apiKey: settings.apiKeys.openai,
+      };
+
       // Simulate API call (this would normally be in background script)
-      const response = await fetch(settings.apiEndpoint, {
+      const response = await fetch(runtimeSettings.apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${settings.apiKey}`,
+          Authorization: `Bearer ${runtimeSettings.apiKey}`,
         },
         body: JSON.stringify({
-          model: settings.model,
+          model: runtimeSettings.model,
           messages: [
             {
               role: 'system',
-              content: `Translate the following text to ${settings.targetLanguage}. Preserve formatting and return only the translation.`,
+              content: `Translate the following text to ${runtimeSettings.targetLanguage}. Preserve formatting and return only the translation.`,
             },
             {
               role: 'user',
@@ -224,21 +264,27 @@ describe('Extension Integration Tests', () => {
       const settings = await new Promise(resolve => {
         chrome.storage.local.get(
           {
-            apiKey: 'invalid-key',
+            apiKeys: { openai: 'invalid-key' },
+            provider: 'openai',
             apiEndpoint: 'http://localhost:3001/v1/chat/completions',
           },
           resolve
         );
       });
 
-      const response = await fetch(settings.apiEndpoint, {
+      const runtimeSettings = {
+        ...settings,
+        apiKey: settings.apiKeys.openai,
+      };
+
+      const response = await fetch(runtimeSettings.apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${settings.apiKey}`,
+          Authorization: `Bearer ${runtimeSettings.apiKey}`,
         },
         body: JSON.stringify({
-          model: 'gpt-4',
+          model: runtimeSettings.model,
           messages: [{ role: 'user', content: 'test' }],
         }),
       });

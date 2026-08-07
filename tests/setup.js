@@ -13,9 +13,15 @@ global.chrome = {
     local: {
       get: jest.fn((keys, callback) => {
         const mockData = {
-          apiKey: 'test-api-key',
+          apiKeys: {
+            openai: 'test-api-key',
+            google: '',
+            ollama: '',
+            custom: '',
+          },
+          provider: 'openai',
           apiEndpoint: 'https://api.openai.com/v1/chat/completions',
-          model: 'gpt-4',
+          model: 'gpt-5.6-luna',
           targetLanguage: 'es',
         };
         if (callback) callback(mockData);

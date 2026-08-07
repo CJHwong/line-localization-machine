@@ -62,6 +62,6 @@ Update `shared/models.js` only:
 
 Actual settings stored in `chrome.storage.local` (defined in `shared/models.js` `DEFAULT_SETTINGS`):
 
-- `apiKey`, `apiEndpoint`, `model`, `customModel`, `targetLanguage`, `reasoningEffort`
+- `apiKeys` (provider-scoped), `provider`, `apiEndpoint`, `model`, `customModel`, `targetLanguage`, `reasoningEffort`
 
 `blocksPerRequest` and `temperature` were removed. Do not re-add them.

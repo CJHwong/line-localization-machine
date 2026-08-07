@@ -13,7 +13,7 @@ A modern browser extension that provides AI-powered line-by-line webpage transla
 - **OpenAI Compatible**: Works with OpenAI API and other compatible endpoints
 - **Streaming Translation**: Single streaming API request per page with progressive rendering as blocks complete
 - **15 Languages**: Support for major world languages with flag emojis
-- **Bring Your Own Key**: API keys stored locally, never shared
+- **Bring Your Own Key**: Provider API keys stored locally, never shared
 
 <https://github.com/user-attachments/assets/1fdb6a30-c0e3-483d-ba92-3405ca712502>
 
@@ -30,10 +30,9 @@ A modern browser extension that provides AI-powered line-by-line webpage transla
 
 ### API Settings
 
-- **API Key**: Your API key (required)
-- **Endpoint**: OpenAI-compatible API endpoint (default: OpenAI)
-- **Model**: Choose from latest 2025 models or enter a custom model ID
-  - **Predefined**: GPT-4o Mini, GPT-5 Mini, GPT-5 Nano
+- **API Key**: The key for the selected provider (required)
+- **Endpoint**: Provider endpoint, or a custom OpenAI-compatible endpoint
+- **Model**: Choose a provider preset or enter a custom model ID
   - **Custom**: Any model ID supported by your API provider
 - **Target Language**: Select from 15 supported languages (Traditional Chinese is default)
 
@@ -57,16 +56,18 @@ A modern browser extension that provides AI-powered line-by-line webpage transla
 
 ### Supported Model Providers
 
-The extension supports any OpenAI-compatible API endpoint:
+The extension supports built-in OpenAI-compatible providers and custom endpoints:
 
 **Built-in Model Options:**
 
-- **OpenAI**: `gpt-4o-mini`, `gpt-5-mini`, `gpt-5-nano`
+- **OpenAI**: `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-luna` (default)
+- **Google**: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite` (default), `gemini-3.1-flash-lite`
+- **Ollama Cloud**: `deepseek-v4-flash:cloud` (default), `deepseek-v4-pro:cloud`, `qwen3.5:cloud`, `gpt-oss:120b-cloud`, `gpt-oss:20b-cloud`
 
 **Custom Model Examples:**
 
-- OpenAI: `gpt-4o`, `gpt-5`
-- Other providers: `gemini-2.5-flash-lite`, etc.
+- OpenAI: any model available to your account
+- Other providers: any OpenAI-compatible model ID
 - Any other OpenAI-compatible model ID
 
 Simply select "Custom Model..." and enter the exact model identifier used by your API provider.
@@ -155,7 +156,7 @@ node tests/e2e/test-translation-pipeline.js --live \
 | ------------------- | ----------------------------------------------------------------- |
 | `--live`            | Use real LLM API instead of mock server                           |
 | `--endpoint=URL`    | API endpoint (default: `https://api.openai.com/v1`)               |
-| `--model=MODEL`     | Model name (default: `gpt-4o-mini`)                               |
+| `--model=MODEL`     | Model name (default: `gpt-5.6-luna`)                              |
 | `--api-key-env=VAR` | Env var holding the API key (default: `OPENAI_API_KEY`)           |
 | `--url=URL`         | Translate a custom URL instead of the test page                   |
 | `--lang=LANG`       | Target language (default: `spanish`)                              |

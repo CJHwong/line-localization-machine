@@ -236,7 +236,15 @@ class BackgroundScript {
   // ─── Migration ───────────────────────────────────────────────────────────
 
   async migrateSettings() {
-    const stored = await chrome.storage.local.get('reasoningEffort');
+    const defaultSettings = this.ModelConfig.getDefaultSettings();
+    const stored = await chrome.storage.local.get([...Object.keys(defaultSettings), 'apiKey']);
+    const migrated = {
+      ...defaultSettings,
+      ...this.ModelConfig.migrateSettings(stored),
+    };
+
+    await this.persistLegacyApiKeyMigration(stored, migrated);
+
     // Migrate 'off' → 'low': 'off' meant "don't send the parameter" which
     // let reasoning models burn unlimited thinking tokens on translation
     if (!stored.reasoningEffort || stored.reasoningEffort === 'off') {
@@ -399,16 +407,42 @@ class BackgroundScript {
   async getSettings() {
     if (!this.ModelConfig) await this.loadSharedConfig();
     const defaultSettings = this.ModelConfig.getDefaultSettings();
-    const settings = await chrome.storage.local.get(Object.keys(defaultSettings));
-    const merged = this.ModelConfig.migrateSettings({ ...defaultSettings, ...settings });
+    const stored = await chrome.storage.local.get([...Object.keys(defaultSettings), 'apiKey']);
+    const merged = {
+      ...defaultSettings,
+      ...this.ModelConfig.migrateSettings(stored),
+    };
+    merged.apiKeys = this.ModelConfig.normalizeApiKeys(merged.apiKeys);
+    await this.persistLegacyApiKeyMigration(stored, merged);
+
     // Resolve the endpoint from provider if not custom
     merged.apiEndpoint = this.ModelConfig.resolveEndpoint(merged.provider, merged.apiEndpoint);
+
+    const apiKey = this.ModelConfig.getApiKey(merged);
+    delete merged.apiKeys;
+    merged.apiKey = apiKey;
     return merged;
   }
 
   async saveSettings(newSettings) {
-    await chrome.storage.local.set(newSettings);
+    const hasLegacyApiKey = Object.prototype.hasOwnProperty.call(newSettings, 'apiKey');
+    const migrated = this.ModelConfig.migrateSettings(newSettings);
+    delete migrated.apiKey;
+    await chrome.storage.local.set(migrated);
+    if (hasLegacyApiKey) {
+      await chrome.storage.local.remove('apiKey');
+    }
     return { success: true };
+  }
+
+  async persistLegacyApiKeyMigration(stored, migrated) {
+    if (!Object.prototype.hasOwnProperty.call(stored, 'apiKey')) return;
+
+    await chrome.storage.local.set({
+      provider: migrated.provider,
+      apiKeys: migrated.apiKeys,
+    });
+    await chrome.storage.local.remove('apiKey');
   }
 
   // ─── Utilities ─────────────────────────────────────────────────────────────

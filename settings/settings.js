@@ -23,6 +23,8 @@ class SettingsController {
     };
 
     this.defaultSettings = ModelConfig.getDefaultSettings();
+    this.apiKeys = ModelConfig.getDefaultApiKeys();
+    this.selectedProvider = this.defaultSettings.provider;
 
     this.init();
   }
@@ -69,11 +71,20 @@ class SettingsController {
 
   async loadSettings() {
     try {
-      const settings = await chrome.storage.local.get(Object.keys(this.defaultSettings));
-      const migrated = ModelConfig.migrateSettings({ ...this.defaultSettings, ...settings });
+      const stored = await chrome.storage.local.get([
+        ...Object.keys(this.defaultSettings),
+        'apiKey',
+      ]);
+      const migrated = {
+        ...this.defaultSettings,
+        ...ModelConfig.migrateSettings(stored),
+      };
+      migrated.apiKeys = ModelConfig.normalizeApiKeys(migrated.apiKeys);
 
       this.elements.provider.value = migrated.provider;
-      this.elements.apiKey.value = migrated.apiKey;
+      this.apiKeys = migrated.apiKeys;
+      this.selectedProvider = migrated.provider;
+      this.elements.apiKey.value = ModelConfig.getApiKey(migrated);
       this.elements.apiEndpoint.value = migrated.apiEndpoint;
       this.elements.customModel.value = migrated.customModel;
       this.elements.targetLanguage.value = migrated.targetLanguage;
@@ -92,6 +103,14 @@ class SettingsController {
 
       this.updateProviderSection();
       this.updateModelSection();
+
+      if (Object.prototype.hasOwnProperty.call(stored, 'apiKey')) {
+        await chrome.storage.local.set({
+          provider: migrated.provider,
+          apiKeys: migrated.apiKeys,
+        });
+        await chrome.storage.local.remove('apiKey');
+      }
     } catch (error) {
       this.showStatus('Error loading settings', 'error');
       console.error('Settings load error:', error);
@@ -101,10 +120,14 @@ class SettingsController {
   bindEvents() {
     // Provider change — swap model list and toggle endpoint visibility
     this.elements.provider.addEventListener('change', () => {
+      this.apiKeys[this.selectedProvider] = this.elements.apiKey.value.trim();
+
       const providerId = this.elements.provider.value;
       const provider = ModelConfig.getProvider(providerId);
+      this.selectedProvider = providerId;
 
       this.populateModelOptions(providerId);
+      this.elements.apiKey.value = this.apiKeys[providerId] || '';
 
       // Set the provider's default model
       if (provider.defaultModel) {
@@ -192,6 +215,7 @@ class SettingsController {
     try {
       const actualModel = this.getResolvedModel();
       const providerId = this.elements.provider.value;
+      this.apiKeys[providerId] = this.elements.apiKey.value.trim();
 
       if (this.elements.model.value === 'custom' && !actualModel) {
         this.showStatus('Please enter a custom model ID', 'error');
@@ -207,7 +231,7 @@ class SettingsController {
 
       const settings = {
         provider: providerId,
-        apiKey: this.elements.apiKey.value.trim(),
+        apiKeys: { ...this.apiKeys },
         apiEndpoint: this.getResolvedEndpoint(),
         model: actualModel,
         customModel: this.elements.customModel.value.trim(),
@@ -216,6 +240,7 @@ class SettingsController {
       };
 
       await chrome.storage.local.set(settings);
+      this.apiKeys = settings.apiKeys;
 
       if (!silent) {
         this.showStatus('Settings saved successfully', 'success');
@@ -297,9 +322,11 @@ class SettingsController {
       // Reset provider and repopulate models
       this.elements.provider.value = this.defaultSettings.provider;
       this.populateModelOptions(this.defaultSettings.provider);
+      this.selectedProvider = this.defaultSettings.provider;
+      this.apiKeys = ModelConfig.getDefaultApiKeys();
 
       // Reset form to defaults
-      this.elements.apiKey.value = this.defaultSettings.apiKey;
+      this.elements.apiKey.value = this.apiKeys[this.selectedProvider];
       this.elements.apiEndpoint.value = this.defaultSettings.apiEndpoint;
       this.elements.customModel.value = this.defaultSettings.customModel;
       this.elements.targetLanguage.value = this.defaultSettings.targetLanguage;

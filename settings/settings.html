@@ -36,14 +36,14 @@
           </div>
 
           <div class="form-group">
-            <label for="apiKey">API Key</label>
+            <label for="apiKey">API Key for Selected Provider</label>
             <div class="input-with-toggle">
-              <input type="password" id="apiKey" placeholder="sk-..." />
+              <input type="password" id="apiKey" placeholder="Provider API key" />
               <button type="button" id="toggleApiKey" class="btn-toggle" title="Show API key">
                 <span class="toggle-icon">&#x25C9;</span>
               </button>
             </div>
-            <small>Stored locally, never shared</small>
+            <small>Stored locally for this provider, never shared</small>
           </div>
 
           <div class="form-group">
@@ -85,7 +85,7 @@
 
           <div class="form-group" id="customModelSection" style="display: none">
             <label for="customModel">Custom Model ID</label>
-            <input type="text" id="customModel" placeholder="e.g., gpt-4-1106-preview" />
+            <input type="text" id="customModel" placeholder="e.g., provider-model-id" />
             <small>Exact model identifier from your provider</small>
           </div>
 

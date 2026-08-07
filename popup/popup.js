@@ -38,17 +38,38 @@ class BeautifulPopupController {
       this.ModelConfig = {
         getDefaultSettings() {
           return {
-            apiKey: '',
+            apiKeys: {
+              openai: '',
+              google: '',
+              ollama: '',
+              custom: '',
+            },
             provider: 'openai',
             apiEndpoint: 'https://api.openai.com/v1',
-            model: 'gpt-5.4-nano',
+            model: 'gpt-5.6-luna',
             customModel: '',
             targetLanguage: 'chinese-traditional',
             reasoningEffort: 'medium',
           };
         },
-        migrateSettings(s) {
-          return s;
+        getDefaultApiKeys() {
+          return { openai: '', google: '', ollama: '', custom: '' };
+        },
+        normalizeApiKeys(apiKeys) {
+          return { ...this.getDefaultApiKeys(), ...(apiKeys || {}) };
+        },
+        getApiKey(settings) {
+          return this.normalizeApiKeys(settings.apiKeys)[settings.provider] || '';
+        },
+        migrateSettings(settings) {
+          const provider = settings.provider || 'openai';
+          const apiKeys = this.normalizeApiKeys(settings.apiKeys);
+          if (settings.apiKey && !apiKeys[provider]) {
+            apiKeys[provider] = settings.apiKey;
+          }
+          const migrated = { ...settings, provider, apiKeys };
+          delete migrated.apiKey;
+          return migrated;
         },
         resolveEndpoint(provider, endpoint) {
           return endpoint;
@@ -158,11 +179,13 @@ class BeautifulPopupController {
 
   async loadSettings() {
     try {
-      this.settings = await chrome.storage.local.get([
+      const stored = await chrome.storage.local.get([
+        'apiKeys',
         'apiKey',
         'provider',
         'apiEndpoint',
         'model',
+        'customModel',
         'targetLanguage',
         'reasoningEffort',
       ]);
@@ -173,14 +196,25 @@ class BeautifulPopupController {
       }
 
       // Set defaults if missing, then migrate & resolve endpoint
-      this.settings = this.ModelConfig.migrateSettings({
+      const migrated = this.ModelConfig.migrateSettings(stored);
+      const merged = {
         ...this.ModelConfig.getDefaultSettings(),
-        ...this.settings,
-      });
-      this.settings.apiEndpoint = this.ModelConfig.resolveEndpoint(
-        this.settings.provider,
-        this.settings.apiEndpoint
-      );
+        ...migrated,
+      };
+      merged.apiKeys = this.ModelConfig.normalizeApiKeys(merged.apiKeys);
+      merged.apiEndpoint = this.ModelConfig.resolveEndpoint(merged.provider, merged.apiEndpoint);
+
+      const apiKey = this.ModelConfig.getApiKey(merged);
+      delete merged.apiKeys;
+      this.settings = { ...merged, apiKey };
+
+      if (Object.prototype.hasOwnProperty.call(stored, 'apiKey')) {
+        await chrome.storage.local.set({
+          provider: merged.provider,
+          apiKeys: this.ModelConfig.normalizeApiKeys(migrated.apiKeys),
+        });
+        await chrome.storage.local.remove('apiKey');
+      }
     } catch (error) {
       console.error('Error loading settings:', error);
       this.updateStatusBadge('error', 'Config Error');
