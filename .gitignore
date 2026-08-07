@@ -26,6 +26,7 @@ yarn.lock
 dist/
 build/
 web-ext-artifacts/
+.playwright-cli/
 
 # Environment variables
 .env
