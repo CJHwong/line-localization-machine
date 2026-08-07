@@ -311,6 +311,65 @@ describe('identifyArticleContent', () => {
     expect(TextExtraction.isArticleContent(h1, articleData)).toBe(true);
   });
 
+  test('requests whole-page fallback when Readability extraction is too small', () => {
+    const articleData = {
+      articleTexts: new Set(),
+      fullArticleText: 'A'.repeat(1000),
+    };
+    const extractedElements = [{ originalText: 'A'.repeat(199) }];
+
+    expect(TextExtraction.shouldFallbackToWholePage(extractedElements, articleData)).toBe(true);
+  });
+
+  test('requests whole-page fallback when Readability coverage is too low', () => {
+    const articleData = {
+      articleTexts: new Set(),
+      fullArticleText: 'A'.repeat(1000),
+    };
+    const extractedElements = [{ originalText: 'A'.repeat(400) }];
+
+    expect(TextExtraction.shouldFallbackToWholePage(extractedElements, articleData)).toBe(true);
+  });
+
+  test('requests whole-page fallback when Readability covers too little of the page', () => {
+    const articleData = {
+      articleTexts: new Set(),
+      fullArticleText: 'A'.repeat(1000),
+      pageText: 'A'.repeat(5000),
+    };
+    const extractedElements = [{ originalText: 'A'.repeat(900) }];
+
+    expect(TextExtraction.shouldFallbackToWholePage(extractedElements, articleData)).toBe(true);
+  });
+
+  test('keeps a sufficiently covered Readability extraction', () => {
+    const articleData = {
+      articleTexts: new Set(),
+      fullArticleText: 'A'.repeat(1000),
+      pageText: 'A'.repeat(3000),
+    };
+    const extractedElements = [{ originalText: 'A'.repeat(600) }];
+
+    expect(TextExtraction.shouldFallbackToWholePage(extractedElements, articleData)).toBe(false);
+  });
+
+  test('restores orphan wrappers before a whole-page retry', () => {
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<p>Before the orphan text.</p>' +
+      '<span data-llm-orphan-wrap="true">Orphan text to restore.</span>' +
+      '<p>After the orphan text.</p>';
+
+    TextExtraction.restoreOrphanTextElements(container);
+
+    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).toBeNull();
+    expect(container.textContent).toContain('Orphan text to restore.');
+  });
+
+  test('does not request fallback when Readability is already unavailable', () => {
+    expect(TextExtraction.shouldFallbackToWholePage([], null)).toBe(false);
+  });
+
   test('normalizeWhitespace collapses whitespace', () => {
     expect(TextExtraction.normalizeWhitespace('  hello   world  ')).toBe('hello world');
     expect(TextExtraction.normalizeWhitespace('line\n\ttwo')).toBe('line two');

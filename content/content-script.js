@@ -120,10 +120,19 @@ class LineLocalizationMachine {
 
     try {
       // Identify article content via Readability (or null for fallback)
-      const articleData = TextExtraction.identifyArticleContent();
+      let articleData = TextExtraction.identifyArticleContent();
 
       // Extract translatable text elements, filtered by article content
-      const textElements = TextExtraction.extractTextElements(document.body, articleData);
+      let textElements = TextExtraction.extractTextElements(document.body, articleData);
+
+      if (TextExtraction.shouldFallbackToWholePage(textElements, articleData)) {
+        console.warn(
+          '[LLM] Readability extraction was insufficient; retrying with whole-page fallback'
+        );
+        TextExtraction.restoreOrphanTextElements(document.body);
+        articleData = null;
+        textElements = TextExtraction.extractTextElements(document.body, null);
+      }
 
       if (textElements.length === 0) {
         throw new Error('No translatable content found on this page');

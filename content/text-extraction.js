@@ -24,6 +24,9 @@ const SKIP_TAGS = new Set([
 ]);
 
 const BLOCK_SELECTORS = 'p, h1, h2, h3, h4, h5, h6, li, td, th, figcaption, dt, dd, blockquote';
+const MIN_ARTICLE_EXTRACTED_CHARS = 200;
+const MIN_ARTICLE_COVERAGE = 0.5;
+const MIN_READABILITY_PAGE_COVERAGE = 0.25;
 
 const SKIP_ANCESTORS = new Set(['PRE', 'CODE', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'CANVAS']);
 
@@ -161,13 +164,14 @@ function identifyArticleContent() {
     }
 
     const fullArticleText = normalizedTitle + ' ' + normalizeWhitespace(article.textContent);
+    const pageText = normalizeWhitespace(document.body.innerText || document.body.textContent);
 
     console.log(
       `[LLM] Readability: identified article "${normalizedTitle}" with ` +
         `${articleTexts.size} text blocks, ${fullArticleText.length} chars`
     );
 
-    return { articleTexts, fullArticleText };
+    return { articleTexts, fullArticleText, pageText };
   } catch (error) {
     console.warn('[LLM] Readability error, using fallback:', error.message);
     return null;
@@ -190,6 +194,46 @@ function isArticleContent(element, articleData) {
   if (text.length >= 20 && articleData.fullArticleText.includes(text)) return true;
 
   return false;
+}
+
+/**
+ * Decide whether a successful Readability parse produced too little usable DOM
+ * content to justify keeping its filter.
+ */
+function shouldFallbackToWholePage(textElements, articleData) {
+  if (!articleData) return false;
+
+  const extractedChars = (textElements || []).reduce(
+    (total, textElement) => total + normalizeWhitespace(textElement.originalText).length,
+    0
+  );
+  const articleChars = normalizeWhitespace(articleData.fullArticleText).length;
+
+  if (extractedChars < MIN_ARTICLE_EXTRACTED_CHARS) return true;
+  if (articleChars === 0) return true;
+
+  const pageChars = normalizeWhitespace(articleData.pageText).length;
+  if (pageChars > articleChars && articleChars / pageChars < MIN_READABILITY_PAGE_COVERAGE) {
+    return true;
+  }
+
+  return extractedChars / articleChars < MIN_ARTICLE_COVERAGE;
+}
+
+/**
+ * Restore orphan text nodes after a discarded Readability extraction pass.
+ */
+function restoreOrphanTextElements(container) {
+  if (!container || typeof container.querySelectorAll !== 'function') return;
+
+  for (const wrapper of container.querySelectorAll('[data-llm-orphan-wrap="true"]')) {
+    if (!wrapper.parentNode) continue;
+
+    while (wrapper.firstChild) {
+      wrapper.parentNode.insertBefore(wrapper.firstChild, wrapper);
+    }
+    wrapper.remove();
+  }
 }
 
 // ─── Element Extraction ───────────────────────────────────────────────────────
@@ -469,6 +513,8 @@ const TextExtraction = {
   identifyArticleContent,
   normalizeWhitespace,
   isArticleContent,
+  shouldFallbackToWholePage,
+  restoreOrphanTextElements,
   extractTextElements,
   groupIntoBlocks,
 };
