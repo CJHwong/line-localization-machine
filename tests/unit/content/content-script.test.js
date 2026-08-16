@@ -242,6 +242,24 @@ describe('extractTextElements', () => {
     expect(elements.length).toBe(1);
   });
 
+  test('extracts blockquotes with bare text', () => {
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<blockquote>Tip: run the command once in a fresh session to see what you are actually on.</blockquote>';
+    const elements = TextExtraction.extractTextElements(container);
+    expect(elements.length).toBe(1);
+    expect(elements[0].element.tagName).toBe('BLOCKQUOTE');
+  });
+
+  test('extracts paragraphs inside blockquotes without duplicating the blockquote', () => {
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<blockquote><p>Any application that can be written in JavaScript will eventually be written in JavaScript.</p></blockquote>';
+    const elements = TextExtraction.extractTextElements(container);
+    expect(elements.length).toBe(1);
+    expect(elements[0].element.tagName).toBe('P');
+  });
+
   test('returns empty array for container with no block elements', () => {
     const container = document.createElement('div');
     container.innerHTML = '<span>x</span>';
@@ -373,6 +391,97 @@ describe('identifyArticleContent', () => {
   test('normalizeWhitespace collapses whitespace', () => {
     expect(TextExtraction.normalizeWhitespace('  hello   world  ')).toBe('hello world');
     expect(TextExtraction.normalizeWhitespace('line\n\ttwo')).toBe('line two');
+  });
+});
+
+// ─── buildArticleRegion ────────────────────────────────────────────────────────
+
+describe('buildArticleRegion', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const inRegion = (region, el) => [...region].some(r => r === el || r.contains(el));
+
+  test('includes the article section, dropped siblings, and the hero', () => {
+    // Simulates the claude.com layout: Readability keeps only body-b, so the
+    // article text matches body-b. The region must still cover body-a (the
+    // dropped sibling) and the hero (title + subtitle).
+    document.body.innerHTML = `
+      <section class="hero_blog_post_wrap">
+        <h1>Maximizing the value of your Claude Code sessions</h1>
+        <p>How to run efficient sessions that get the most value from every token.</p>
+      </section>
+      <section class="blog_post_section_wrap">
+        <div class="blog_post_wrap">
+          <div class="body-a"><div class="u-rich-text-blog"><p>Until pretty recently, the tools you wrote code with were a flat fee, and your editor cost the same whether you fixed one test or fifty that afternoon, so the price of a token was never something you had to think about while you worked.</p></div></div>
+          <div class="body-b"><div class="u-rich-text-blog"><p>A request goes through the GPU in two phases, and they cost different amounts, so the price of a token depends on which model you are running and how much context it reads, and that is why the same task can cost very different amounts.</p></div></div>
+        </div>
+      </section>
+      <section class="blog_related_section_wrap">
+        <h2>Related posts</h2>
+        <p>Related content that should not be translated.</p>
+      </section>
+    `;
+    const article = {
+      title: 'Maximizing the value of your Claude Code sessions',
+      textContent:
+        'A request goes through the GPU in two phases, and they cost different amounts, so the price of a token depends on which model you are running and how much context it reads, and that is why the same task can cost very different amounts.',
+    };
+    const region = TextExtraction.buildArticleRegion(article);
+    expect(region).not.toBeNull();
+    expect(inRegion(region, document.querySelector('.body-a'))).toBe(true);
+    expect(inRegion(region, document.querySelector('.body-b'))).toBe(true);
+    expect(inRegion(region, document.querySelector('.hero_blog_post_wrap'))).toBe(true);
+    expect(inRegion(region, document.querySelector('.blog_related_section_wrap'))).toBe(false);
+  });
+
+  test('falls back to top candidate plus article-like siblings when the boundary is not mostly article', () => {
+    document.body.innerHTML = `
+      <section class="page">
+        <div class="article"><div class="u-rich-text-blog"><p>This is the article body text that Readability kept, and it is long enough to be the top candidate for the region search, with enough words to pass the minimum length check that the region builder requires before it will consider a container.</p></div></div>
+        <div class="comments">
+          <p>Comment one that is long enough to matter here and adds a lot of text to the section.</p>
+          <p>Comment two that is long enough to matter here and adds a lot of text to the section.</p>
+          <p>Comment three that is long enough to matter here and adds a lot of text to the section.</p>
+          <p>Comment four that is long enough to matter here and adds a lot of text to the section.</p>
+          <p>Comment five that is long enough to matter here and adds a lot of text to the section.</p>
+        </div>
+      </section>
+    `;
+    const article = {
+      title: 'T',
+      textContent:
+        'This is the article body text that Readability kept, and it is long enough to be the top candidate for the region search, with enough words to pass the minimum length check that the region builder requires before it will consider a container.',
+    };
+    const region = TextExtraction.buildArticleRegion(article);
+    expect(region).not.toBeNull();
+    expect(inRegion(region, document.querySelector('.article'))).toBe(true);
+    expect(inRegion(region, document.querySelector('.comments'))).toBe(false);
+  });
+
+  test('returns null when no container matches the article text', () => {
+    document.body.innerHTML =
+      '<div><p>Unrelated page content that has nothing to do with the article.</p></div>';
+    const article = {
+      title: 'Some other title',
+      textContent: 'Article text that does not appear anywhere on this page.',
+    };
+    expect(TextExtraction.buildArticleRegion(article)).toBeNull();
+  });
+
+  test('isArticleContent accepts elements inside the region and rejects outside', () => {
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<div class="article"><p>Article paragraph that should be accepted.</p></div>' +
+      '<p>Outside paragraph that should be rejected.</p>';
+    const articleDiv = container.querySelector('.article');
+    const region = new Set([articleDiv]);
+    const articleData = { articleTexts: new Set(), fullArticleText: '', region };
+    const inside = container.querySelector('.article p');
+    const outside = container.querySelector('div + p');
+    expect(TextExtraction.isArticleContent(inside, articleData)).toBe(true);
+    expect(TextExtraction.isArticleContent(outside, articleData)).toBe(false);
   });
 });
 

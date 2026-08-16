@@ -166,16 +166,155 @@ function identifyArticleContent() {
     const fullArticleText = normalizedTitle + ' ' + normalizeWhitespace(article.textContent);
     const pageText = normalizeWhitespace(document.body.innerText || document.body.textContent);
 
+    // Build the article region: live DOM roots that contain the article.
+    // Readability's parse can drop article content (sibling containers, hero),
+    // so the region replaces text matching against the parse output.
+    const region = buildArticleRegion(article);
+
     console.log(
       `[LLM] Readability: identified article "${normalizedTitle}" with ` +
-        `${articleTexts.size} text blocks, ${fullArticleText.length} chars`
+        `${articleTexts.size} text blocks, ${fullArticleText.length} chars, ` +
+        `region: ${region ? region.size + ' root(s)' : 'none (text matching)'}`
     );
 
-    return { articleTexts, fullArticleText, pageText };
+    return { articleTexts, fullArticleText, pageText, region };
   } catch (error) {
     console.warn('[LLM] Readability error, using fallback:', error.message);
     return null;
   }
+}
+
+// ─── Article Region (live DOM) ───────────────────────────────────────────────
+
+/**
+ * Check whether an element is inside the article region (a set of live DOM roots).
+ */
+function isInsideRegion(element, region) {
+  for (const root of region) {
+    if (root === element || root.contains(element)) return true;
+  }
+  return false;
+}
+
+/**
+ * Find the live element whose text best matches the Readability article output.
+ * Returns the innermost container with the highest overlap ratio, or null.
+ */
+function findTopCandidate(articleText) {
+  let best = null;
+  let bestRatio = 0;
+  for (const el of document.body.querySelectorAll('div, section, article, main')) {
+    const text = normalizeWhitespace(el.textContent);
+    if (text.length < 100) continue;
+    const ratio =
+      Math.min(articleText.length, text.length) / Math.max(articleText.length, text.length);
+    if (ratio > bestRatio) {
+      bestRatio = ratio;
+      best = el;
+    }
+  }
+  return bestRatio >= 0.5 ? best : null;
+}
+
+/**
+ * Decide whether a sibling container looks like article content.
+ * Rejects hidden elements, non-content zones, and link-heavy containers.
+ */
+function isArticleLikeSibling(element) {
+  if (element.classList.contains('w-condition-invisible')) return false;
+  const style = element.getAttribute('style') || '';
+  if (style.includes('display: none') || style.includes('visibility: hidden')) return false;
+  if (element.closest(FALLBACK_NON_CONTENT)) return false;
+  const text = normalizeWhitespace(element.textContent);
+  if (text.length < 200) return false;
+  // Mostly links → navigation or card lists, not article prose
+  const linkText = normalizeWhitespace(
+    [...element.querySelectorAll('a')].map(a => a.textContent).join(' ')
+  );
+  if (linkText.length / text.length > 0.5) return false;
+  return true;
+}
+
+/**
+ * Find the section containing the article title (the hero).
+ * Matches the H1 against the Readability title.
+ */
+function findHeroSection(title) {
+  const normalizedTitle = normalizeWhitespace(title);
+  if (normalizedTitle.length < 10) return null;
+  for (const h1 of document.querySelectorAll('h1')) {
+    const h1Text = normalizeWhitespace(h1.textContent);
+    const matches =
+      h1Text === normalizedTitle ||
+      (h1Text.length >= 10 &&
+        (h1Text.includes(normalizedTitle) || normalizedTitle.includes(h1Text)));
+    if (!matches) continue;
+    let hero = h1;
+    while (hero.parentElement && hero.parentElement !== document.body) {
+      const parent = hero.parentElement;
+      if (['SECTION', 'ARTICLE', 'MAIN'].includes(parent.tagName)) return parent;
+      if (normalizeWhitespace(parent.textContent).length < 200) break;
+      hero = parent;
+    }
+    return hero;
+  }
+  return null;
+}
+
+/**
+ * Build the article region: a set of live DOM roots that contain the article.
+ *
+ * Readability's parse can drop article content that lives in sibling containers
+ * (multi-column layouts) or in the hero. Text-matching against the parse output
+ * then rejects that content. The region replaces text matching: everything
+ * inside the region is article content.
+ */
+function buildArticleRegion(article) {
+  const articleText = normalizeWhitespace(article.textContent);
+  if (articleText.length < 200) return null;
+
+  const topCandidate = findTopCandidate(articleText);
+  if (!topCandidate) return null;
+
+  const region = new Set();
+
+  // Walk up to the nearest section/article/main boundary
+  let boundary = topCandidate;
+  while (boundary.parentElement && boundary.parentElement !== document.body) {
+    const parent = boundary.parentElement;
+    if (['SECTION', 'ARTICLE', 'MAIN'].includes(parent.tagName)) {
+      boundary = parent;
+      break;
+    }
+    boundary = parent;
+  }
+
+  // If the boundary is mostly article text, use it as the region root.
+  // Otherwise fall back to the top candidate plus article-like siblings.
+  const boundaryText = normalizeWhitespace(boundary.textContent);
+  const boundaryRatio =
+    Math.min(articleText.length, boundaryText.length) /
+    Math.max(articleText.length, boundaryText.length);
+  if (boundaryRatio >= 0.5) {
+    region.add(boundary);
+  } else {
+    region.add(topCandidate);
+    let current = topCandidate;
+    while (current.parentElement && current !== boundary) {
+      const parent = current.parentElement;
+      for (const sibling of parent.children) {
+        if (sibling === current || region.has(sibling)) continue;
+        if (isArticleLikeSibling(sibling)) region.add(sibling);
+      }
+      current = parent;
+    }
+  }
+
+  // Hero: the section containing the article title
+  const hero = findHeroSection(article.title);
+  if (hero) region.add(hero);
+
+  return region;
 }
 
 /**
@@ -189,6 +328,13 @@ function isArticleContent(element, articleData) {
 
   const text = normalizeWhitespace(element.textContent);
   if (text.length < 10) return false;
+
+  // Region mode: accept everything inside the article region. Readability's
+  // parse can drop article content (sibling containers, hero), so text
+  // matching against the parse output is not reliable.
+  if (articleData.region) {
+    return isInsideRegion(element, articleData.region);
+  }
 
   if (articleData.articleTexts.has(text)) return true;
   if (text.length >= 20 && articleData.fullArticleText.includes(text)) return true;
@@ -248,7 +394,11 @@ function extractTextElements(container, articleData) {
   const textElements = [];
 
   if (articleData) {
-    console.log('[LLM] Extracting with Readability filter');
+    console.log(
+      articleData.region
+        ? `[LLM] Extracting with article region (${articleData.region.size} roots)`
+        : '[LLM] Extracting with Readability text filter'
+    );
   } else {
     console.log('[LLM DEBUG] Fallback mode: no Readability data, using non-content blocklist');
   }
@@ -291,11 +441,11 @@ function extractTextElements(container, articleData) {
       }
 
       // Skip containers with block children (not leaf elements)
-      if (element.tagName === 'BLOCKQUOTE') continue;
       if (element.querySelector(BLOCK_SELECTORS)) continue;
 
-      // Fallback mode: skip non-content zones when Readability is unavailable
-      if (!articleData) {
+      // Skip non-content zones (fallback mode, or region mode where the region
+      // may include non-article zones such as share buttons)
+      if (!articleData || articleData.region) {
         const nonContentAncestor = element.closest(FALLBACK_NON_CONTENT);
         if (nonContentAncestor && nonContentAncestor !== container) continue;
       }
@@ -517,4 +667,6 @@ const TextExtraction = {
   restoreOrphanTextElements,
   extractTextElements,
   groupIntoBlocks,
+  buildArticleRegion,
+  isInsideRegion,
 };
