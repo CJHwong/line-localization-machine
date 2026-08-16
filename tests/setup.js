@@ -83,13 +83,18 @@ global.fetch = jest.fn(() =>
   })
 );
 
-// Mock DOM methods commonly used in content scripts
+// Mock DOM methods commonly used in content scripts.
+// Respect inline display styles (jsdom's real getComputedStyle does);
+// default to block for everything else.
 Object.defineProperty(window, 'getComputedStyle', {
-  value: () => ({
-    getPropertyValue: () => '',
-    display: 'block',
-    visibility: 'visible',
-  }),
+  value: el => {
+    const inline = el && el.style ? el.style.display : '';
+    return {
+      getPropertyValue: () => '',
+      display: inline || 'block',
+      visibility: 'visible',
+    };
+  },
 });
 
 // Reset mocks before each test

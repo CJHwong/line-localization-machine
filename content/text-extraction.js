@@ -89,6 +89,59 @@ const BLOCK_TAGS = new Set([
   'DIALOG',
 ]);
 
+// Tags that are always inline — orphan runs may wrap them without changing
+// layout. Unknown tags (custom elements) are decided by computed display.
+const INLINE_TAGS = new Set([
+  'A',
+  'ABBR',
+  'B',
+  'BDI',
+  'BDO',
+  'BR',
+  'BUTTON',
+  'CITE',
+  'CODE',
+  'DATA',
+  'DEL',
+  'DFN',
+  'EM',
+  'I',
+  'IMG',
+  'INS',
+  'KBD',
+  'LABEL',
+  'MARK',
+  'Q',
+  'SAMP',
+  'SMALL',
+  'SPAN',
+  'STRONG',
+  'SUB',
+  'SUP',
+  'TIME',
+  'U',
+  'VAR',
+  'WBR',
+]);
+
+/**
+ * True when the element renders inline. Custom elements default to inline in
+ * browsers, but pages often style them block/flex/grid — wrapping those in an
+ * orphan span inserts an unstyled box into the page's layout (grid items land
+ * in the wrong column, flex items collapse), so they must flush the run.
+ */
+function isInlineElement(element) {
+  if (INLINE_TAGS.has(element.tagName)) return true;
+  const display = getComputedStyle(element).display;
+  return (
+    display === 'inline' ||
+    display === 'inline-block' ||
+    display === 'inline-flex' ||
+    display === 'inline-grid' ||
+    display === 'contents'
+  );
+}
+
 // ─── Text Node Collection ─────────────────────────────────────────────────────
 
 /**
@@ -219,14 +272,20 @@ function findTopCandidate(articleText) {
 /**
  * Decide whether a sibling container looks like article content.
  * Rejects hidden elements, non-content zones, and link-heavy containers.
+ * Short siblings (under 200 chars) are still article content when Readability
+ * kept their text — the length floor alone rejects short standalone
+ * paragraphs. Scripts and styles are never article content.
  */
-function isArticleLikeSibling(element) {
+function isArticleLikeSibling(element, articleText) {
+  if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') return false;
   if (element.classList.contains('w-condition-invisible')) return false;
   const style = element.getAttribute('style') || '';
   if (style.includes('display: none') || style.includes('visibility: hidden')) return false;
   if (element.closest(FALLBACK_NON_CONTENT)) return false;
   const text = normalizeWhitespace(element.textContent);
-  if (text.length < 200) return false;
+  if (text.length < 200) {
+    if (text.length < 10 || !articleText.includes(text)) return false;
+  }
   // Mostly links → navigation or card lists, not article prose
   const linkText = normalizeWhitespace(
     [...element.querySelectorAll('a')].map(a => a.textContent).join(' ')
@@ -304,7 +363,7 @@ function buildArticleRegion(article) {
       const parent = current.parentElement;
       for (const sibling of parent.children) {
         if (sibling === current || region.has(sibling)) continue;
-        if (isArticleLikeSibling(sibling)) region.add(sibling);
+        if (isArticleLikeSibling(sibling, articleText)) region.add(sibling);
       }
       current = parent;
     }
@@ -550,7 +609,7 @@ function collectOrphanTextElements(container, processedElements, textElements, a
       }
 
       if (child.nodeType === 1 /* ELEMENT_NODE */) {
-        if (BLOCK_TAGS.has(child.tagName)) {
+        if (BLOCK_TAGS.has(child.tagName) || !isInlineElement(child)) {
           flushRun();
           continue;
         }

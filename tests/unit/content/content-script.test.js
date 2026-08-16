@@ -242,6 +242,40 @@ describe('extractTextElements', () => {
     expect(elements.length).toBe(1);
   });
 
+  test('does not wrap block-level custom elements in orphan spans', () => {
+    // Pages style custom elements as flex/grid (e.g. blog.google's
+    // uni-article-paragraph). Wrapping them in a span inserts an unstyled
+    // box into the page layout — grid items land in the wrong column.
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<section>' +
+      '<uni-article-paragraph style="display:flex">' +
+      '<p>Paragraph text inside a custom element that must be extracted.</p>' +
+      '</uni-article-paragraph>' +
+      '</section>';
+    const elements = TextExtraction.extractTextElements(container);
+    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).toBeNull();
+    expect(elements.length).toBe(1);
+    expect(elements[0].element.tagName).toBe('P');
+  });
+
+  test('wraps inline custom elements in orphan spans', () => {
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<x-inline style="display:inline">Orphan text inside an inline custom element.</x-inline>';
+    const elements = TextExtraction.extractTextElements(container);
+    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).not.toBeNull();
+    expect(elements.some(e => e.element.hasAttribute('data-llm-orphan-wrap'))).toBe(true);
+  });
+
+  test('wraps bare orphan text in a span', () => {
+    const container = document.createElement('div');
+    container.innerHTML = 'Bare orphan text that is long enough to wrap into a span.';
+    const elements = TextExtraction.extractTextElements(container);
+    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).not.toBeNull();
+    expect(elements.length).toBe(1);
+  });
+
   test('extracts blockquotes with bare text', () => {
     const container = document.createElement('div');
     container.innerHTML =
@@ -458,6 +492,61 @@ describe('buildArticleRegion', () => {
     expect(region).not.toBeNull();
     expect(inRegion(region, document.querySelector('.article'))).toBe(true);
     expect(inRegion(region, document.querySelector('.comments'))).toBe(false);
+  });
+
+  test('includes short siblings whose text Readability kept', () => {
+    // Simulates the blog.google layout: a short standalone paragraph section
+    // (under the 200-char floor) whose text is in the article output.
+    document.body.innerHTML = `
+      <section class="page">
+        <div class="article"><div class="u-rich-text-blog"><p>This is the article body text that Readability kept, and it is long enough to be the top candidate for the region search, with enough words to pass the minimum length check that the region builder requires before it will consider a container.</p></div></div>
+        <div class="carousel"><p>Carousel caption text that is long enough to dilute the boundary ratio below the threshold so the fallback path runs instead of the boundary path.</p></div>
+        <div class="short-para"><p>Short paragraph that Readability kept.</p></div>
+      </section>
+    `;
+    const article = {
+      title: 'T',
+      textContent:
+        'This is the article body text that Readability kept, and it is long enough to be the top candidate for the region search, with enough words to pass the minimum length check that the region builder requires before it will consider a container. Short paragraph that Readability kept.',
+    };
+    const region = TextExtraction.buildArticleRegion(article);
+    expect(region).not.toBeNull();
+    expect(inRegion(region, document.querySelector('.short-para'))).toBe(true);
+  });
+
+  test('excludes short siblings whose text Readability dropped', () => {
+    document.body.innerHTML = `
+      <section class="page">
+        <div class="article"><div class="u-rich-text-blog"><p>This is the article body text that Readability kept, and it is long enough to be the top candidate for the region search, with enough words to pass the minimum length check that the region builder requires before it will consider a container.</p></div></div>
+        <div class="carousel"><p>Carousel caption text that is long enough to dilute the boundary ratio below the threshold so the fallback path runs instead of the boundary path, and this extra sentence makes the carousel even longer so the boundary ratio drops well below the half mark that decides which path the region builder takes.</p></div>
+        <div class="short-para"><p>Short paragraph that Readability did not keep.</p></div>
+      </section>
+    `;
+    const article = {
+      title: 'T',
+      textContent:
+        'This is the article body text that Readability kept, and it is long enough to be the top candidate for the region search, with enough words to pass the minimum length check that the region builder requires before it will consider a container.',
+    };
+    const region = TextExtraction.buildArticleRegion(article);
+    expect(region).not.toBeNull();
+    expect(inRegion(region, document.querySelector('.short-para'))).toBe(false);
+  });
+
+  test('never adds script elements to the region', () => {
+    document.body.innerHTML = `
+      <section class="page">
+        <div class="article"><div class="u-rich-text-blog"><p>This is the article body text that Readability kept, and it is long enough to be the top candidate for the region search, with enough words to pass the minimum length check that the region builder requires before it will consider a container.</p></div></div>
+        <script>var longJsonData = '{"reading_time":"11 min read","author":"Google"}';</script>
+      </section>
+    `;
+    const article = {
+      title: 'T',
+      textContent:
+        'This is the article body text that Readability kept, and it is long enough to be the top candidate for the region search, with enough words to pass the minimum length check that the region builder requires before it will consider a container.',
+    };
+    const region = TextExtraction.buildArticleRegion(article);
+    expect(region).not.toBeNull();
+    expect([...region].some(r => r.tagName === 'SCRIPT')).toBe(false);
   });
 
   test('returns null when no container matches the article text', () => {
