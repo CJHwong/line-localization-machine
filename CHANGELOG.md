@@ -3,6 +3,38 @@
 Each entry is split into the two strings needed at submission time:
 **Release Notes** (store detail page) and **Notes to Reviewer** (AMO source review).
 
+## 2.2.4 (2026-08-16)
+
+### Release Notes
+
+- Fixed translation coverage on pages where the article is split across multiple containers: the TL;DR, intro, and hero subtitle sections are now translated.
+- Fixed layout breakage on some pages after translation (e.g. blog.google), where article paragraphs collapsed into a narrow column.
+- Tip callouts and other blockquote content are now translated.
+
+### Notes to Reviewer
+
+No build step. The extension ships as plain JavaScript with no transpilation, bundling, or minification. The submitted zips are byte-equivalent to the output of the project's packaging scripts.
+
+Reproduce from a clean checkout:
+
+    git clone https://github.com/CJHwong/line-localization-machine.git
+    cd line-localization-machine
+    git checkout v2.2.4
+    npm install        # installs ESLint, Prettier, Jest, Playwright, web-ext only; no runtime dependencies
+    npm run lint
+    npm run format:check
+    npm test
+    npm run pack       # writes dist/line-localization-machine-chrome.zip and dist/line-localization-machine-firefox.zip
+
+The Firefox zip differs from the Chrome zip by one manifest entry: the `"service_worker"` key is removed from `manifest.json` (Firefox MV3 uses `background.scripts`).
+
+Vendored third-party code, unmodified and unminified:
+
+    vendor/readability-0.6.0/   Mozilla Readability, Apache 2.0
+    vendor/jsonriver-1.1.1/     progressive JSON parser by Google, BSD-3-Clause
+
+This release improves article extraction coverage (multi-container layouts, blockquotes) and fixes a layout regression on pages that style custom elements as grid or flex containers.
+
 ## 2.2.3 (2026-08-07)
 
 ### Release Notes
