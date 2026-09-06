@@ -4,7 +4,7 @@
 class LineLocalizationMachine {
   constructor() {
     this.isTranslating = false;
-    this.translatedElements = new Map(); // element → { originalHTML, translatedHTML }
+    this.translatedElements = new Map(); // element → { textChanges }
     this.translationSettings = null;
     this.animationQueue = [];
     this.translationHistory = []; // Store translation pairs for context
@@ -102,8 +102,8 @@ class LineLocalizationMachine {
     // before extraction, otherwise we extract translated text and re-translate it.
     // Must happen BEFORE clearPreviousTranslationState which clears translatedElements.
     if (this.translatedElements.size > 0) {
-      for (const [element, data] of this.translatedElements) {
-        element.innerHTML = data.originalHTML;
+      for (const [element, translation] of this.translatedElements) {
+        Animation.restoreTranslation(element, translation, true);
       }
     }
 
@@ -503,14 +503,14 @@ class LineLocalizationMachine {
       const segments = translatedItems[k] || item.textNodes.map(n => n.textContent);
 
       try {
-        const htmlPair = await Animation.animateLineTransition(
+        const translation = await Animation.animateLineTransition(
           item,
           segments,
           this.translationSettings,
           this.debug
         );
-        if (htmlPair) {
-          this.translatedElements.set(item.element, htmlPair);
+        if (translation) {
+          this.translatedElements.set(item.element, translation);
         }
       } catch (animationError) {
         console.warn('Error animating item:', animationError);

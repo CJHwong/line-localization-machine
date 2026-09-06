@@ -28,7 +28,8 @@ global.Animation = {
   animateBlockStart: () => {},
   animateBlockError: () => {},
   animateTranslation: () => {},
-  animateLineTransition: () => ({ originalHTML: '', translatedHTML: '' }),
+  animateLineTransition: () => ({ textChanges: [] }),
+  restoreTranslation: () => {},
   addGlobalToggleButton: () => {},
   playCompletionSound: () => {},
 };
@@ -666,7 +667,7 @@ describe('renderCachedBlocks', () => {
     Animation.hideTranslationProgress = jest.fn();
     Animation.animateBlockStart = jest.fn();
     Animation.animateBlockError = jest.fn();
-    Animation.animateLineTransition = jest.fn(() => ({ originalHTML: '', translatedHTML: '' }));
+    Animation.animateLineTransition = jest.fn(() => ({ textChanges: [] }));
     Animation.addGlobalToggleButton = jest.fn();
 
     machine = new LineLocalizationMachine();

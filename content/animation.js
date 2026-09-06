@@ -192,7 +192,7 @@ async function animateTranslation(block, translatedItems, settings) {
 
 /**
  * 4-phase animation: fade out → replace text nodes → fade in → settle.
- * Returns { originalHTML, translatedHTML } for toggle support.
+ * Retains text nodes so toggles preserve page controls and event handlers.
  */
 async function animateLineTransition(item, translatedSegments, settings, debug) {
   const element = item.element;
@@ -207,30 +207,39 @@ async function animateLineTransition(item, translatedSegments, settings, debug) 
     ? translatedSegments
     : [String(translatedSegments ?? '')];
 
+  if (segments.length !== item.textNodes.length) {
+    console.warn(
+      `Segment count mismatch: expected ${item.textNodes.length}, got ${segments.length}`
+    );
+    element.classList.remove('llm-preparing');
+    return null;
+  }
+
+  const textChanges = item.textNodes.map((node, index) => ({
+    node,
+    originalText: node.textContent,
+    translatedText: segments[index],
+  }));
+
   // Phase 1: Quick fade out
   element.classList.remove('llm-preparing');
   element.classList.add('llm-fading-out');
   await delay(50);
 
-  // Snapshot original innerHTML BEFORE any modification (for toggle restore)
-  const originalHTML = element.innerHTML;
-
-  // Phase 2: Replace text nodes directly — never touch DOM structure
-  if (segments.length === item.textNodes.length) {
-    item.textNodes.forEach((node, i) => {
-      node.textContent = segments[i];
-    });
-  } else {
-    if (debug) {
-      console.warn(
-        `Segment count mismatch: expected ${item.textNodes.length}, got ${segments.length}`
-      );
-    }
-    element.textContent = segments.join('');
+  // The page can replace its nodes while the animation waits.
+  if (
+    !document.contains(element) ||
+    textChanges.some(
+      change => !element.contains(change.node) || change.node.textContent !== change.originalText
+    )
+  ) {
+    element.classList.remove('llm-fading-out');
+    return null;
   }
 
-  // Snapshot translated innerHTML (for toggle restore)
-  const translatedHTML = element.innerHTML;
+  for (const change of textChanges) {
+    change.node.textContent = change.translatedText;
+  }
 
   // Mark as translated
   element.setAttribute('data-llm-state', 'translated');
@@ -243,7 +252,17 @@ async function animateLineTransition(item, translatedSegments, settings, debug) 
   // Phase 4: Settle
   element.classList.add('llm-settled');
 
-  return { originalHTML, translatedHTML };
+  return { textChanges };
+}
+
+function restoreTranslation(element, translation, showingOriginals) {
+  if (!document.contains(element)) return;
+  for (const change of translation.textChanges) {
+    const expectedText = showingOriginals ? change.translatedText : change.originalText;
+    // Leave updates from the page intact.
+    if (!element.contains(change.node) || change.node.textContent !== expectedText) continue;
+    change.node.textContent = showingOriginals ? change.originalText : change.translatedText;
+  }
 }
 
 // ─── Toggle Button ────────────────────────────────────────────────────────────
@@ -270,12 +289,21 @@ function createToggleButton(translatedElements, retranslateCallback) {
     : '';
   toggleButton.innerHTML = `
     <div class="llm-toggle-container">
+      <div id="llm-translation-controls">
       ${retranslateHTML}
       <button class="llm-toggle-btn" title="Toggle between translated and original text">
         <svg class="toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 0 1 6.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <span class="toggle-text">Show Originals</span>
+      </button>
+      </div>
+      <button type="button" class="llm-collapse-btn" aria-expanded="true"
+        aria-controls="llm-translation-controls" aria-label="Collapse translation controls"
+        title="Collapse translation controls">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
       </button>
     </div>
   `;
@@ -317,6 +345,37 @@ function createToggleButton(translatedElements, retranslateCallback) {
       cursor: pointer;
       transition: all 0.2s ease;
       border-radius: 4px 0 0 4px;
+    }
+
+    #llm-translation-controls {
+      display: flex;
+    }
+
+    #llm-translation-controls[hidden] {
+      display: none;
+    }
+
+    #llm-original-toggle .llm-collapse-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      min-height: 36px;
+      padding: 0;
+      border: none;
+      border-radius: 4px;
+      background: none;
+      color: #2d2a25;
+      cursor: pointer;
+    }
+
+    #llm-original-toggle .llm-collapse-btn:hover {
+      background: #f7f6f3;
+      color: #d97706;
+    }
+
+    #llm-original-toggle .llm-collapse-btn[aria-expanded="false"] svg {
+      transform: rotate(180deg);
     }
 
     .llm-retranslate-btn:hover {
@@ -373,6 +432,16 @@ function createToggleButton(translatedElements, retranslateCallback) {
   document.head.appendChild(style);
   document.body.appendChild(toggleButton);
 
+  const collapseButton = toggleButton.querySelector('.llm-collapse-btn');
+  const controls = toggleButton.querySelector('#llm-translation-controls');
+  collapseButton.addEventListener('click', () => {
+    controls.hidden = !controls.hidden;
+    collapseButton.setAttribute('aria-expanded', String(!controls.hidden));
+    const label = controls.hidden ? 'Expand translation controls' : 'Collapse translation controls';
+    collapseButton.setAttribute('aria-label', label);
+    collapseButton.title = label;
+  });
+
   if (retranslateCallback) {
     const retranslateBtn = toggleButton.querySelector('.llm-retranslate-btn');
     retranslateBtn.addEventListener('click', () => {
@@ -394,13 +463,12 @@ function createToggleButton(translatedElements, retranslateCallback) {
       ? 'Show Translations'
       : 'Show Originals';
 
-    for (const [element, data] of translatedElements) {
+    for (const [element, translation] of translatedElements) {
+      restoreTranslation(element, translation, globalShowingOriginals);
       if (globalShowingOriginals) {
-        element.innerHTML = data.originalHTML;
         element.setAttribute('data-llm-state', 'showing-original');
         element.classList.add('llm-showing-original');
       } else {
-        element.innerHTML = data.translatedHTML;
         element.setAttribute('data-llm-state', 'translated');
         element.classList.remove('llm-showing-original');
       }
@@ -421,5 +489,6 @@ const Animation = {
   animateBlockError,
   animateTranslation,
   animateLineTransition,
+  restoreTranslation,
   addGlobalToggleButton,
 };
