@@ -3,6 +3,42 @@
 Each entry is split into the two strings needed at submission time:
 **Release Notes** (store detail page) and **Notes to Reviewer** (AMO source review).
 
+## 2.2.5 (2026-09-06)
+
+### Release Notes
+
+- Fixed translation toggles that broke buttons and other page controls.
+- Keep original content when translation segments do not match, instead of removing page elements.
+- Added a button to collapse and expand the Show Originals panel.
+
+### Notes to Reviewer
+
+The extension ships as plain JavaScript with no transpilation, bundling, minification, or code generation.
+The packaging scripts copy source files into each archive.
+The Firefox package removes the `background.service_worker` entry and retains `background.scripts`.
+
+Reproduce from a clean checkout:
+
+    git clone https://github.com/CJHwong/line-localization-machine.git
+    cd line-localization-machine
+    git checkout v2.2.5
+    npm install
+    npm test
+    npm run publish:prep
+
+Upload packages:
+
+- `dist/line-localization-machine-chrome.zip`
+- `dist/line-localization-machine-firefox.zip`
+
+Vendored third-party code:
+
+- `vendor/readability-0.6.0/`: Mozilla Readability, Apache 2.0.
+- `vendor/jsonriver-1.1.1/`: progressive JSON parser by Google, BSD-3-Clause.
+
+Both libraries remain unmodified and unminified.
+This release preserves page controls during text restoration and adds a collapsible translation panel.
+
 ## 2.2.4 (2026-08-16)
 
 ### Release Notes
