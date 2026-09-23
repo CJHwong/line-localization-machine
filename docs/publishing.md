@@ -136,7 +136,12 @@ Before publishing, ensure you have:
    - **Support Email**: Contact email for user support
    - **License**: MIT License (as specified in package.json)
 
-4. **Review Process**:
+4. **New version of an existing add-on**:
+   - My Add-ons > Line Localization Machine > Submit a New Version
+   - Upload `dist/line-localization-machine-firefox.zip`
+   - On "Describe Version", paste **Release Notes** and **Notes to Reviewer** from the matching `CHANGELOG.md` entry
+
+5. **Review Process**:
    - Firefox reviews source code manually
    - Process typically takes 1-7 business days
    - Reviewers may request changes

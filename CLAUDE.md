@@ -50,6 +50,8 @@ Every version bump must also append a new entry to `CHANGELOG.md` containing two
 
 The reproduction steps must produce the exact zip the reviewer is reviewing. Reference the version-bump commit by SHA or tag.
 
+After `npm run publish:prep`, print both strings in chat, each in its own code block, ready to paste into the AMO "Submit a New Version > Describe Version" form (Release Notes, Notes to Reviewer). Both AMO fields are plain text, so convert the CHANGELOG Markdown: `-` bullets stay, backticks and indented code blocks do not render.
+
 ### Adding New Models
 
 Update `shared/models.js` only:
