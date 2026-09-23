@@ -50,7 +50,7 @@ Every version bump must also append a new entry to `CHANGELOG.md` containing two
 
 The reproduction steps must produce the exact zip the reviewer is reviewing. Reference the version-bump commit by SHA or tag.
 
-After `npm run publish:prep`, print both strings in chat, each in its own code block, ready to paste into the AMO "Submit a New Version > Describe Version" form (Release Notes, Notes to Reviewer). Both AMO fields are plain text, so convert the CHANGELOG Markdown: `-` bullets stay, backticks and indented code blocks do not render.
+After `npm run publish:prep`, print both strings in chat, each in its own code block, ready to paste into the AMO "Submit a New Version > Describe Version" form (Release Notes, Notes to Reviewer). Both AMO fields are plain text, so convert the CHANGELOG Markdown: `-` bullets stay, backticks and indented code blocks do not render. Also state the answer to the "Do You Need to Submit Source Code?" step: **No**, because packaging copies source files as-is. The answer becomes Yes if a build tool, bundler, minifier, or template engine is ever added.
 
 ### Adding New Models
 

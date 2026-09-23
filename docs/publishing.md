@@ -139,6 +139,7 @@ Before publishing, ensure you have:
 4. **New version of an existing add-on**:
    - My Add-ons > Line Localization Machine > Submit a New Version
    - Upload `dist/line-localization-machine-firefox.zip`
+   - On "Do You Need to Submit Source Code?", answer **No**. The package holds the source files unchanged, with no bundler, minifier, or template engine.
    - On "Describe Version", paste **Release Notes** and **Notes to Reviewer** from the matching `CHANGELOG.md` entry
 
 5. **Review Process**:
