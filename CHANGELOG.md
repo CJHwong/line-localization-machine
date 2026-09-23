@@ -3,6 +3,42 @@
 Each entry is split into the two strings needed at submission time:
 **Release Notes** (store detail page) and **Notes to Reviewer** (AMO source review).
 
+## 2.2.6 (2026-09-23)
+
+### Release Notes
+
+- Fixed pages built with React or Next.js (for example anthropic.com model pages) that showed "This page couldn't load" after translation.
+- Added newer and cheaper models: GPT-6 Sol and GPT-6 Luna, Gemini 3.8 Flash, and GLM 5.3 Flash, DeepSeek V4.1 Flash, Gemma 4 and Nemotron 3 on Ollama Cloud.
+- New defaults: GPT-6 Luna for OpenAI and GLM 5.3 Flash for Ollama Cloud. A saved model that left the list keeps working as a custom model.
+
+### Notes to Reviewer
+
+The extension ships as plain JavaScript with no transpilation, bundling, minification, or code generation.
+The packaging scripts copy source files into each archive.
+The Firefox package removes the `background.service_worker` entry and retains `background.scripts`.
+
+Reproduce from a clean checkout:
+
+    git clone https://github.com/CJHwong/line-localization-machine.git
+    cd line-localization-machine
+    git checkout v2.2.6
+    npm install
+    npm test
+    npm run publish:prep
+
+Upload packages:
+
+- `dist/line-localization-machine-chrome.zip`
+- `dist/line-localization-machine-firefox.zip`
+
+Vendored third-party code:
+
+- `vendor/readability-0.6.0/`: Mozilla Readability, Apache 2.0.
+- `vendor/jsonriver-1.1.1/`: progressive JSON parser by Google, BSD-3-Clause.
+
+Both libraries remain unmodified and unminified.
+This release translates loose page text without moving page nodes, and updates the built-in model lists.
+
 ## 2.2.5 (2026-09-06)
 
 ### Release Notes
