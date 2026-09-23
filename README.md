@@ -60,9 +60,9 @@ The extension supports built-in OpenAI-compatible providers and custom endpoints
 
 **Built-in Model Options:**
 
-- **OpenAI**: `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-luna` (default)
-- **Google**: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite` (default), `gemini-3.1-flash-lite`
-- **Ollama Cloud**: `deepseek-v4-flash:cloud` (default), `deepseek-v4-pro:cloud`, `qwen3.5:cloud`, `gpt-oss:120b-cloud`, `gpt-oss:20b-cloud`
+- **OpenAI**: `gpt-6-sol`, `gpt-6-luna` (default), `gpt-5.6-terra`, `gpt-5.6-luna`
+- **Google**: `gemini-3.8-flash`, `gemini-3.5-flash-lite` (default), `gemini-3.1-flash-lite`
+- **Ollama Cloud**: `glm-5.3-flash` (default), `deepseek-v4.1-flash`, `gemma4:31b`, `qwen3.5:397b`, `nemotron-3-super`, `nemotron-3-nano:30b`, `nemotron-3-ultra`
 
 **Custom Model Examples:**
 

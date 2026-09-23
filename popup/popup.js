@@ -46,7 +46,7 @@ class BeautifulPopupController {
             },
             provider: 'openai',
             apiEndpoint: 'https://api.openai.com/v1',
-            model: 'gpt-5.6-luna',
+            model: 'gpt-6-luna',
             customModel: '',
             targetLanguage: 'chinese-traditional',
             reasoningEffort: 'medium',

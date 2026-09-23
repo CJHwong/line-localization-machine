@@ -16,29 +16,31 @@ const ModelConfig = global.ModelConfig;
 describe('ModelConfig', () => {
   describe('provider model presets', () => {
     test('uses the confirmed current defaults', () => {
-      expect(ModelConfig.PROVIDERS.openai.defaultModel).toBe('gpt-5.6-luna');
+      expect(ModelConfig.PROVIDERS.openai.defaultModel).toBe('gpt-6-luna');
       expect(ModelConfig.PROVIDERS.google.defaultModel).toBe('gemini-3.5-flash-lite');
-      expect(ModelConfig.PROVIDERS.ollama.defaultModel).toBe('deepseek-v4-flash:cloud');
+      expect(ModelConfig.PROVIDERS.ollama.defaultModel).toBe('glm-5.3-flash');
     });
 
     test('contains the supported current models', () => {
       expect(ModelConfig.getModelsForProvider('openai')).toEqual([
-        'gpt-5.6',
+        'gpt-6-sol',
+        'gpt-6-luna',
         'gpt-5.6-terra',
         'gpt-5.6-luna',
       ]);
       expect(ModelConfig.getModelsForProvider('google')).toEqual([
-        'gemini-3.6-flash',
-        'gemini-3.5-flash',
+        'gemini-3.8-flash',
         'gemini-3.5-flash-lite',
         'gemini-3.1-flash-lite',
       ]);
       expect(ModelConfig.getModelsForProvider('ollama')).toEqual([
-        'deepseek-v4-flash:cloud',
-        'deepseek-v4-pro:cloud',
-        'qwen3.5:cloud',
-        'gpt-oss:120b-cloud',
-        'gpt-oss:20b-cloud',
+        'glm-5.3-flash',
+        'deepseek-v4.1-flash',
+        'gemma4:31b',
+        'qwen3.5:397b',
+        'nemotron-3-super',
+        'nemotron-3-nano:30b',
+        'nemotron-3-ultra',
       ]);
     });
 
@@ -66,7 +68,7 @@ describe('ModelConfig', () => {
         custom: '',
       });
       expect(defaults.provider).toBe('openai');
-      expect(defaults.model).toBe('gpt-5.6-luna');
+      expect(defaults.model).toBe('gpt-6-luna');
       expect(defaults.reasoningEffort).toBe('medium');
     });
 
