@@ -71,3 +71,21 @@ test('translation skips nodes replaced during the animation delay', async () => 
   expect(await pending).toBeNull();
   expect(item.element.textContent).toBe('Choose Updated by page');
 });
+
+test('in-place items translate text without styling their container', async () => {
+  document.body.innerHTML = '<div>Orphan text in a container<p>Block</p></div>';
+  const element = document.querySelector('div');
+  const item = { element, textNodes: [element.firstChild], inPlace: true };
+  Animation.animateBlockStart([item]);
+  const translation = await Animation.animateLineTransition(item, ['容器中的文字'], {});
+  expect(element.firstChild.textContent).toBe('容器中的文字');
+  expect(element.className).toBe('');
+  expect(element.hasAttribute('data-llm-state')).toBe(false);
+  expect(translation.inPlace).toBe(true);
+  Animation.addGlobalToggleButton(new Map([[element, translation]]));
+  await new Promise(resolve => setTimeout(resolve, 1550));
+  document.querySelector('.llm-toggle-btn').click();
+  expect(element.firstChild.textContent).toBe('Orphan text in a container');
+  expect(element.className).toBe('');
+  expect(element.hasAttribute('data-llm-state')).toBe(false);
+});

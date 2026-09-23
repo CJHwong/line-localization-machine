@@ -168,17 +168,35 @@ function hideTranslationProgress() {
 
 // ─── Block Animations ─────────────────────────────────────────────────────────
 
+// In-place orphan runs share a container with other content, so styling the
+// container would pulse or fade text that is not part of the run.
 function animateBlockStart(block) {
   block.forEach(item => {
-    item.element.classList.add('llm-preparing');
+    if (!item.inPlace) item.element.classList.add('llm-preparing');
   });
 }
 
 function animateBlockError(block) {
   block.forEach(item => {
+    if (item.inPlace) return;
     item.element.classList.remove('llm-preparing');
     item.element.classList.add('llm-error');
   });
+}
+
+// The page can replace its nodes while the animation waits.
+function replaceTextNodes(element, textChanges) {
+  const pageChanged =
+    !document.contains(element) ||
+    textChanges.some(
+      change => !element.contains(change.node) || change.node.textContent !== change.originalText
+    );
+  if (pageChanged) return false;
+
+  for (const change of textChanges) {
+    change.node.textContent = change.translatedText;
+  }
+  return true;
 }
 
 async function animateTranslation(block, translatedItems, settings) {
@@ -221,24 +239,18 @@ async function animateLineTransition(item, translatedSegments, settings, debug) 
     translatedText: segments[index],
   }));
 
+  if (item.inPlace) {
+    return replaceTextNodes(element, textChanges) ? { textChanges, inPlace: true } : null;
+  }
+
   // Phase 1: Quick fade out
   element.classList.remove('llm-preparing');
   element.classList.add('llm-fading-out');
   await delay(50);
 
-  // The page can replace its nodes while the animation waits.
-  if (
-    !document.contains(element) ||
-    textChanges.some(
-      change => !element.contains(change.node) || change.node.textContent !== change.originalText
-    )
-  ) {
+  if (!replaceTextNodes(element, textChanges)) {
     element.classList.remove('llm-fading-out');
     return null;
-  }
-
-  for (const change of textChanges) {
-    change.node.textContent = change.translatedText;
   }
 
   // Mark as translated
@@ -465,6 +477,7 @@ function createToggleButton(translatedElements, retranslateCallback) {
 
     for (const [element, translation] of translatedElements) {
       restoreTranslation(element, translation, globalShowingOriginals);
+      if (translation.inPlace) continue;
       if (globalShowingOriginals) {
         element.setAttribute('data-llm-state', 'showing-original');
         element.classList.add('llm-showing-original');

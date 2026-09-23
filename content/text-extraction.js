@@ -89,8 +89,8 @@ const BLOCK_TAGS = new Set([
   'DIALOG',
 ]);
 
-// Tags that are always inline — orphan runs may wrap them without changing
-// layout. Unknown tags (custom elements) are decided by computed display.
+// Tags that are always inline, so they belong to the surrounding orphan run.
+// Unknown tags (custom elements) are decided by computed display.
 const INLINE_TAGS = new Set([
   'A',
   'ABBR',
@@ -126,9 +126,8 @@ const INLINE_TAGS = new Set([
 
 /**
  * True when the element renders inline. Custom elements default to inline in
- * browsers, but pages often style them block/flex/grid — wrapping those in an
- * orphan span inserts an unstyled box into the page's layout (grid items land
- * in the wrong column, flex items collapse), so they must flush the run.
+ * browsers, but pages often style them block/flex/grid. Those are separate
+ * blocks of text, so they must flush the orphan run.
  */
 function isInlineElement(element) {
   if (INLINE_TAGS.has(element.tagName)) return true;
@@ -379,13 +378,13 @@ function buildArticleRegion(article) {
 /**
  * Check if an element's text matches article content identified by Readability.
  */
-function isArticleContent(element, articleData) {
+function isArticleContent(element, articleData, textContent = element.textContent) {
   if (!articleData) return true; // No Readability data → accept everything (fallback mode)
 
   // Headings are structurally part of the article — skip Readability matching
   if (/^H[1-6]$/.test(element.tagName)) return true;
 
-  const text = normalizeWhitespace(element.textContent);
+  const text = normalizeWhitespace(textContent);
   if (text.length < 10) return false;
 
   // Region mode: accept everything inside the article region. Readability's
@@ -423,22 +422,6 @@ function shouldFallbackToWholePage(textElements, articleData) {
   }
 
   return extractedChars / articleChars < MIN_ARTICLE_COVERAGE;
-}
-
-/**
- * Restore orphan text nodes after a discarded Readability extraction pass.
- */
-function restoreOrphanTextElements(container) {
-  if (!container || typeof container.querySelectorAll !== 'function') return;
-
-  for (const wrapper of container.querySelectorAll('[data-llm-orphan-wrap="true"]')) {
-    if (!wrapper.parentNode) continue;
-
-    while (wrapper.firstChild) {
-      wrapper.parentNode.insertBefore(wrapper.firstChild, wrapper);
-    }
-    wrapper.remove();
-  }
 }
 
 // ─── Element Extraction ───────────────────────────────────────────────────────
@@ -564,30 +547,15 @@ function collectOrphanTextElements(container, processedElements, textElements, a
         return;
       }
 
-      // Create a wrapper span so we have an element to mark as translated
-      const span = document.createElement('span');
-      span.setAttribute('data-llm-orphan-wrap', 'true');
-      orphanRun[0].parentNode.insertBefore(span, orphanRun[0]);
-      for (const node of orphanRun) {
-        span.appendChild(node);
-      }
-
-      // Readability filter
-      if (!isArticleContent(span, articleData)) {
-        // Unwrap — put nodes back where they were
-        while (span.firstChild) {
-          span.parentNode.insertBefore(span.firstChild, span);
+      // Translate the run in place. Moving framework-owned nodes into a
+      // wrapper makes React's next insertBefore throw and crash the page.
+      if (isArticleContent(wrapper, articleData, runTextContent)) {
+        const textNodes = orphanRun.flatMap(node =>
+          node.nodeType === 3 /* TEXT_NODE */ ? [node] : collectTextNodes(node)
+        );
+        if (textNodes.length > 0) {
+          textElements.push({ element: wrapper, originalText: trimmed, textNodes, inPlace: true });
         }
-        span.remove();
-        orphanRun = [];
-        runTextContent = '';
-        return;
-      }
-
-      const textNodes = collectTextNodes(span);
-      if (textNodes.length > 0) {
-        textElements.push({ element: span, originalText: trimmed, textNodes });
-        processedElements.add(span);
       }
 
       orphanRun = [];
@@ -723,7 +691,6 @@ const TextExtraction = {
   normalizeWhitespace,
   isArticleContent,
   shouldFallbackToWholePage,
-  restoreOrphanTextElements,
   extractTextElements,
   groupIntoBlocks,
   buildArticleRegion,

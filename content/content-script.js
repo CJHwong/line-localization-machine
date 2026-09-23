@@ -129,7 +129,6 @@ class LineLocalizationMachine {
         console.warn(
           '[LLM] Readability extraction was insufficient; retrying with whole-page fallback'
         );
-        TextExtraction.restoreOrphanTextElements(document.body);
         articleData = null;
         textElements = TextExtraction.extractTextElements(document.body, null);
       }
@@ -483,6 +482,16 @@ class LineLocalizationMachine {
     return `${this.computeHash(textBlocks)}_${targetLanguage}`;
   }
 
+  // In-place orphan runs share their container, so merge instead of overwrite.
+  storeTranslation(element, translation) {
+    const existing = this.translatedElements.get(element);
+    if (existing) {
+      existing.textChanges.push(...translation.textChanges);
+      return;
+    }
+    this.translatedElements.set(element, translation);
+  }
+
   async renderBlockItems(originalBlock, translatedItems) {
     if (translatedItems.length < originalBlock.length) {
       while (translatedItems.length < originalBlock.length) {
@@ -510,7 +519,7 @@ class LineLocalizationMachine {
           this.debug
         );
         if (translation) {
-          this.translatedElements.set(item.element, translation);
+          this.storeTranslation(item.element, translation);
         }
       } catch (animationError) {
         console.warn('Error animating item:', animationError);

@@ -260,21 +260,33 @@ describe('extractTextElements', () => {
     expect(elements[0].element.tagName).toBe('P');
   });
 
-  test('wraps inline custom elements in orphan spans', () => {
+  test('translates inline custom elements in place', () => {
+    // Moving framework-owned nodes into a wrapper crashes React pages
+    // (insertBefore on a node that is no longer a child).
     const container = document.createElement('div');
     container.innerHTML =
       '<x-inline style="display:inline">Orphan text inside an inline custom element.</x-inline>';
+    const inline = container.firstChild;
     const elements = TextExtraction.extractTextElements(container);
-    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).not.toBeNull();
-    expect(elements.some(e => e.element.hasAttribute('data-llm-orphan-wrap'))).toBe(true);
+    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).toBeNull();
+    expect(inline.parentNode).toBe(container);
+    expect(elements.length).toBe(1);
+    expect(elements[0].element).toBe(container);
+    expect(elements[0].inPlace).toBe(true);
+    expect(elements[0].textNodes[0]).toBe(inline.firstChild);
   });
 
-  test('wraps bare orphan text in a span', () => {
+  test('translates bare orphan text in place', () => {
     const container = document.createElement('div');
-    container.innerHTML = 'Bare orphan text that is long enough to wrap into a span.';
+    container.innerHTML = 'Bare orphan text that is long enough to translate in place.';
+    const textNode = container.firstChild;
     const elements = TextExtraction.extractTextElements(container);
-    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).toBeNull();
+    expect(textNode.parentNode).toBe(container);
     expect(elements.length).toBe(1);
+    expect(elements[0].element).toBe(container);
+    expect(elements[0].inPlace).toBe(true);
+    expect(elements[0].textNodes[0]).toBe(textNode);
   });
 
   test('extracts blockquotes with bare text', () => {
@@ -404,19 +416,6 @@ describe('identifyArticleContent', () => {
     const extractedElements = [{ originalText: 'A'.repeat(600) }];
 
     expect(TextExtraction.shouldFallbackToWholePage(extractedElements, articleData)).toBe(false);
-  });
-
-  test('restores orphan wrappers before a whole-page retry', () => {
-    const container = document.createElement('div');
-    container.innerHTML =
-      '<p>Before the orphan text.</p>' +
-      '<span data-llm-orphan-wrap="true">Orphan text to restore.</span>' +
-      '<p>After the orphan text.</p>';
-
-    TextExtraction.restoreOrphanTextElements(container);
-
-    expect(container.querySelector('[data-llm-orphan-wrap="true"]')).toBeNull();
-    expect(container.textContent).toContain('Orphan text to restore.');
   });
 
   test('does not request fallback when Readability is already unavailable', () => {
@@ -701,6 +700,27 @@ describe('renderCachedBlocks', () => {
     expect(Animation.animateLineTransition).toHaveBeenCalled();
     expect(Animation.addGlobalToggleButton).toHaveBeenCalled();
     expect(Animation.hideTranslationProgress).toHaveBeenCalled();
+  });
+
+  test('keeps every in-place translation that shares a container', async () => {
+    const container = document.createElement('div');
+    container.innerHTML = 'First orphan run<p>Block</p>Second orphan run';
+    const [first, , second] = container.childNodes;
+    const block = [
+      { element: container, originalText: 'First orphan run', textNodes: [first], inPlace: true },
+      { element: container, originalText: 'Second orphan run', textNodes: [second], inPlace: true },
+    ];
+    Animation.animateLineTransition = jest.fn(item => ({
+      textChanges: [{ node: item.textNodes[0] }],
+      inPlace: true,
+    }));
+
+    await machine.renderBlockItems(block, [['一'], ['二']]);
+
+    const changes = machine.translatedElements.get(container).textChanges;
+    expect(changes.length).toBe(2);
+    expect(changes[0].node).toBe(first);
+    expect(changes[1].node).toBe(second);
   });
 
   test('handles cached block id with no matching original', async () => {
