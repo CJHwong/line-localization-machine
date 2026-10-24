@@ -3,6 +3,41 @@
 Each entry is split into the two strings needed at submission time:
 **Release Notes** (store detail page) and **Notes to Reviewer** (AMO source review).
 
+## 2.2.7 (2026-10-24)
+
+### Release Notes
+
+- Fixed translation missing most of the page on sites that keep a hidden privacy or cookie dialog.
+- Hidden page content is no longer translated, which lowers API usage on those pages.
+
+### Notes to Reviewer
+
+The extension ships as plain JavaScript with no transpilation, bundling, minification, or code generation.
+The packaging scripts copy source files into each archive.
+The Firefox package removes the `background.service_worker` entry and retains `background.scripts`.
+
+Reproduce from a clean checkout:
+
+    git clone https://github.com/CJHwong/line-localization-machine.git
+    cd line-localization-machine
+    git checkout v2.2.7
+    npm install
+    npm test
+    npm run publish:prep
+
+Upload packages:
+
+- `dist/line-localization-machine-chrome.zip`
+- `dist/line-localization-machine-firefox.zip`
+
+Vendored third-party code:
+
+- `vendor/readability-0.6.0/`: Mozilla Readability, Apache 2.0.
+- `vendor/jsonriver-1.1.1/`: progressive JSON parser by Google, BSD-3-Clause.
+
+Both libraries remain unmodified and unminified.
+This release skips hidden page content during article extraction, so a closed privacy dialog can no longer capture the translation.
+
 ## 2.2.6 (2026-09-23)
 
 ### Release Notes
