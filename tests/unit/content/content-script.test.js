@@ -160,6 +160,28 @@ describe('extractTextElements', () => {
     expect(elements.length).toBeGreaterThanOrEqual(1);
   });
 
+  test('skips elements inside a hidden ancestor', () => {
+    // A closed <dialog> is display:none on the dialog only. The child reports
+    // display:block, so an own-style check lets a privacy notice through.
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<dialog style="display:none"><p>Privacy notice paragraph long enough to extract.</p></dialog>' +
+      '<p>Visible article paragraph long enough to extract.</p>';
+    const elements = TextExtraction.extractTextElements(container);
+    expect(elements.length).toBe(1);
+    expect(elements[0].originalText).toContain('Visible article');
+  });
+
+  test('skips orphan text inside a hidden wrapper', () => {
+    const container = document.createElement('div');
+    container.innerHTML =
+      '<div style="display:none">Hidden orphan text long enough to count as a run.</div>' +
+      '<div>Visible orphan text long enough to count as a run.</div>';
+    const elements = TextExtraction.extractTextElements(container);
+    expect(elements.length).toBe(1);
+    expect(elements[0].originalText).toContain('Visible orphan');
+  });
+
   test('skips elements inside <pre>/<code>', () => {
     const container = document.createElement('div');
     container.innerHTML =
@@ -530,6 +552,25 @@ describe('buildArticleRegion', () => {
     const region = TextExtraction.buildArticleRegion(article);
     expect(region).not.toBeNull();
     expect(inRegion(region, document.querySelector('.short-para'))).toBe(false);
+  });
+
+  test('rejects a hidden dialog whose text matches the Readability output', () => {
+    // block.xyz/dessa: a closed privacy dialog holds 15k chars of legal prose.
+    // Readability scores it above the real page, so the dialog becomes the
+    // article output. The region must not follow it.
+    document.body.innerHTML = `
+      <main id="article"><section><p>Every clip below is a live recording of a person talking to Dessa, nothing scripted and nothing edited, recorded in one sitting with the model responding in real time.</p></section><section><p>We trained Dessa from scratch on nothing but human conversation, so its timing comes from speech instead of text.</p></section></main>
+      <dialog id="privacy-dialog" style="display:none"><p>Privacy Notice Effective Date: October 21, 2026. This Privacy Notice describes how Block, Inc. and our affiliates collect, use, disclose, transfer, store, retain or otherwise process personal information in connection with the services we provide.</p></dialog>
+    `;
+    const article = {
+      title: 'T',
+      textContent:
+        'Privacy Notice Effective Date: October 21, 2026. This Privacy Notice describes how Block, Inc. and our affiliates collect, use, disclose, transfer, store, retain or otherwise process personal information in connection with the services we provide. Every clip below is a live recording of a person talking to Dessa, nothing scripted and nothing edited.',
+    };
+    const region = TextExtraction.buildArticleRegion(article);
+    expect(region).not.toBeNull();
+    expect(inRegion(region, document.querySelector('main#article'))).toBe(true);
+    expect(inRegion(region, document.querySelector('#privacy-dialog'))).toBe(false);
   });
 
   test('never adds script elements to the region', () => {

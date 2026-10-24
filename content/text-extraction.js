@@ -141,6 +141,34 @@ function isInlineElement(element) {
   );
 }
 
+// ─── Visibility ───────────────────────────────────────────────────────────────
+
+/**
+ * True when the element is rendered on the page.
+ *
+ * Readability parses a clone of the document, so closed dialogs and CSS-hidden
+ * panels are part of that clone. A privacy notice inside a closed <dialog> can
+ * outscore the real page. Hidden content must never be a region root, a region
+ * sibling, or a translation target.
+ *
+ * Opacity is not checked: scroll-reveal sections start at opacity 0 and still
+ * carry real page text.
+ */
+function isVisiblyRendered(element) {
+  if (typeof element.checkVisibility === 'function') {
+    return element.checkVisibility();
+  }
+  for (
+    let current = element;
+    current && current !== document.documentElement;
+    current = current.parentElement
+  ) {
+    const style = getComputedStyle(current);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+  }
+  return true;
+}
+
 // ─── Text Node Collection ─────────────────────────────────────────────────────
 
 /**
@@ -256,6 +284,7 @@ function findTopCandidate(articleText) {
   let best = null;
   let bestRatio = 0;
   for (const el of document.body.querySelectorAll('div, section, article, main')) {
+    if (!isVisiblyRendered(el)) continue;
     const text = normalizeWhitespace(el.textContent);
     if (text.length < 100) continue;
     const ratio =
@@ -278,8 +307,7 @@ function findTopCandidate(articleText) {
 function isArticleLikeSibling(element, articleText) {
   if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') return false;
   if (element.classList.contains('w-condition-invisible')) return false;
-  const style = element.getAttribute('style') || '';
-  if (style.includes('display: none') || style.includes('visibility: hidden')) return false;
+  if (!isVisiblyRendered(element)) return false;
   if (element.closest(FALLBACK_NON_CONTENT)) return false;
   const text = normalizeWhitespace(element.textContent);
   if (text.length < 200) {
@@ -476,8 +504,7 @@ function extractTextElements(container, articleData) {
       if (element.classList.contains('llm-no-translate')) continue;
 
       try {
-        const style = getComputedStyle(element);
-        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        if (!isVisiblyRendered(element)) continue;
       } catch (_styleError) {
         // continue anyway
       }
@@ -534,6 +561,7 @@ function collectOrphanTextElements(container, processedElements, textElements, a
 
   for (const wrapper of [container, ...wrappers]) {
     if (textElements.length >= 1000) break;
+    if (!isVisiblyRendered(wrapper)) continue;
 
     let orphanRun = [];
     let runTextContent = '';
@@ -581,8 +609,10 @@ function collectOrphanTextElements(container, processedElements, textElements, a
           flushRun();
           continue;
         }
-        // Inline element with content — part of the run
+        // Inline element with content — part of the run. Hidden inline nodes
+        // (screen-reader text) are skipped without breaking the sentence.
         if (child.textContent.trim().length > 0) {
+          if (!isVisiblyRendered(child)) continue;
           orphanRun.push(child);
           runTextContent += child.textContent;
           continue;
